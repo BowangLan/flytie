@@ -8,6 +8,10 @@
  * @module
  */
 
+import type * as airports from "../airports.js";
+import type * as flights from "../flights.js";
+import type * as states from "../states.js";
+import type * as statesTypes from "../statesTypes.js";
 import type * as todos from "../todos.js";
 
 import type {
@@ -17,6 +21,10 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  airports: typeof airports;
+  flights: typeof flights;
+  states: typeof states;
+  statesTypes: typeof statesTypes;
   todos: typeof todos;
 }>;
 

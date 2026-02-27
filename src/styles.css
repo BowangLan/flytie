@@ -172,3 +172,7 @@ body {
 * {
   font-family: 'Inter', sans-serif;
 }
+
+.font-mono {
+  font-family: 'Noto Sans Mono', monospace;
+}

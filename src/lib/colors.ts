@@ -1,0 +1,14 @@
+export const COLORS = {
+  NEUTRAL_100: '#ffffff',
+  NEUTRAL_200: '#f5f5f5',
+  NEUTRAL_300: '#d6d3d1',
+  NEUTRAL_400: '#a8a29e',
+  NEUTRAL_500: '#737373',
+  NEUTRAL_600: '#525252',
+  NEUTRAL_700: '#3f3f3f',
+  NEUTRAL_800: '#262626',
+  NEUTRAL_900: '#171717',
+  NEUTRAL_1000: '#0a0a0a',
+
+  PRIMARY: '#007bff',
+}

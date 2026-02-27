@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef } from 'react'
+import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js'
-import type { Flight } from './flights'
+import type { State } from 'convex/statesTypes'
+import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
+import { useSelectedFlightStore } from '@/store/selected-flight.store'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -11,8 +14,21 @@ const MARKER_Z = 1
 /** Half-span of the plane silhouette in world units (degrees). */
 const MARKER_SIZE = 0.7
 
-/** White — flight markers. */
-const COLOR_MARKER = new THREE.Color('#ffffff')
+/** Maximum screen size of a marker in pixels — prevents markers from growing
+ *  indefinitely as the user zooms in. */
+const MAX_MARKER_SCREEN_PX = 14
+
+/** Normal fill color for markers. */
+
+const COLOR_MARKER = new THREE.Color(WORLD_MAP_COLORS.marker)
+const COLOR_MARKER_HOVER = new THREE.Color(WORLD_MAP_COLORS.markerHover)
+const COLOR_MARKER_SELECTED = new THREE.Color(WORLD_MAP_COLORS.markerSelected)
+
+/** Border color for markers (sea-ink). */
+const COLOR_BORDER = new THREE.Color('#0a0a0a')
+
+/** Scale factor for border mesh — slightly larger than fill to create outline. */
+const BORDER_SCALE = 1.12
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -42,7 +58,7 @@ function buildMarkerGeometry(): THREE.BufferGeometry {
 
   const shapes: THREE.Shape[] = []
   for (const path of parsed.paths) {
-    SVGLoader.createShapes(path).forEach(s => shapes.push(s))
+    SVGLoader.createShapes(path).forEach((s) => shapes.push(s))
   }
   if (shapes.length === 0) return new THREE.BufferGeometry()
 
@@ -59,7 +75,10 @@ function buildMarkerGeometry(): THREE.BufferGeometry {
 
   // White vertex colors
   const count = geo.getAttribute('position').count
-  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3).fill(1), 3))
+  geo.setAttribute(
+    'color',
+    new THREE.BufferAttribute(new Float32Array(count * 3).fill(1), 3),
+  )
 
   return geo
 }
@@ -67,43 +86,146 @@ function buildMarkerGeometry(): THREE.BufferGeometry {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface FlightMarkersProps {
-  flights: Flight[]
+  states: State[]
+  onHover?: (state: State | null, x: number, y: number) => void
+  onClick?: (icao24: string) => void
 }
 
 /**
  * Renders all aircraft as instanced filled plane silhouettes on the world map.
  * Each plane is rotated to match the aircraft's true track.
  */
-export function FlightMarkers({ flights }: FlightMarkersProps) {
+export function FlightMarkers({ states, onHover, onClick }: FlightMarkersProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null)
+  const borderMeshRef = useRef<THREE.InstancedMesh>(null)
   const geometry = useMemo(buildMarkerGeometry, [])
+  const { camera } = useThree()
 
+  // Keep states accessible inside useFrame without a stale closure.
+  const statesRef = useRef(states)
+  statesRef.current = states
+
+  const onHoverRef = useRef(onHover)
+  onHoverRef.current = onHover
+
+  const onClickRef = useRef(onClick)
+  onClickRef.current = onClick
+
+  const selectedIcao24 = useSelectedFlightStore((state) => state.selectedIcao24)
+  const selectedIcao24Ref = useRef(selectedIcao24)
+  selectedIcao24Ref.current = selectedIcao24
+
+  // Dirty flag: set when states change OR when zoom crosses a scale threshold.
+  const dirtyRef = useRef(true)
+  const lastScaleRef = useRef(1)
+
+  /** Index of the currently hovered instance, or -1 for none. */
+  const hoveredIndexRef = useRef(-1)
+
+  // Mark dirty whenever the states array or selection changes.
   useEffect(() => {
+    dirtyRef.current = true
+  }, [states, selectedIcao24])
+
+  useFrame(() => {
     const mesh = meshRef.current
-    if (!mesh) return
+    const borderMesh = borderMeshRef.current
+    if (!mesh || !borderMesh || !(camera instanceof THREE.OrthographicCamera))
+      return
 
-    for (let i = 0; i < flights.length; i++) {
-      const flight = flights[i]!
+    // Scale so markers never exceed MAX_MARKER_SCREEN_PX pixels.
+    const scale = Math.min(
+      1,
+      MAX_MARKER_SCREEN_PX / (camera.zoom * MARKER_SIZE),
+    )
 
-      scratch.position.set(flight.longitude, flight.latitude, MARKER_Z)
-      // trueTrack is clockwise from north; Three.js Z-rotation is counter-clockwise.
-      scratch.rotation.z = -THREE.MathUtils.degToRad(flight.trueTrack ?? 0)
-      scratch.scale.setScalar(1)
-      scratch.updateMatrix()
-
-      mesh.setMatrixAt(i, scratch.matrix)
-      mesh.setColorAt(i, COLOR_MARKER)
+    if (Math.abs(scale - lastScaleRef.current) > 0.001) {
+      dirtyRef.current = true
+      lastScaleRef.current = scale
     }
 
+    if (!dirtyRef.current) return
+    dirtyRef.current = false
+
+    const cur = statesRef.current
+    for (let i = 0; i < cur.length; i++) {
+      const state = cur[i]!
+
+      scratch.position.set(state.longitude, state.latitude, MARKER_Z)
+      // trueTrack is clockwise from north; Three.js Z-rotation is counter-clockwise.
+      scratch.rotation.z = -THREE.MathUtils.degToRad(state.trueTrack ?? 0)
+
+      // Border: slightly larger, rendered behind
+      scratch.scale.setScalar(lastScaleRef.current * BORDER_SCALE)
+      scratch.updateMatrix()
+      borderMesh.setMatrixAt(i, scratch.matrix)
+      borderMesh.setColorAt(i, COLOR_BORDER)
+
+      // Fill: normal scale, highlight if selected or hovered (selected takes precedence)
+      scratch.scale.setScalar(lastScaleRef.current)
+      scratch.updateMatrix()
+      mesh.setMatrixAt(i, scratch.matrix)
+      const isSelected = state.icao24 === selectedIcao24Ref.current
+      const isHovered = i === hoveredIndexRef.current
+      const fillColor = isSelected
+        ? COLOR_MARKER_SELECTED
+        : isHovered
+          ? COLOR_MARKER_HOVER
+          : COLOR_MARKER
+      mesh.setColorAt(i, fillColor)
+    }
+
+    borderMesh.instanceMatrix.needsUpdate = true
+    if (borderMesh.instanceColor) borderMesh.instanceColor.needsUpdate = true
     mesh.instanceMatrix.needsUpdate = true
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
-  }, [flights])
+  })
 
-  if (flights.length === 0) return null
+  if (states.length === 0) return null
 
   return (
-    <instancedMesh ref={meshRef} args={[geometry, undefined, flights.length]}>
-      <meshBasicMaterial side={THREE.DoubleSide} vertexColors />
-    </instancedMesh>
+    <>
+      {/* Border: rendered first so it appears behind the fill */}
+      <instancedMesh
+        ref={borderMeshRef}
+        args={[geometry, undefined, states.length]}
+        frustumCulled={false}
+      >
+        <meshBasicMaterial side={THREE.DoubleSide} vertexColors />
+      </instancedMesh>
+      {/* Fill — pointer events for hover detection */}
+      <instancedMesh
+        ref={meshRef}
+        args={[geometry, undefined, states.length]}
+        frustumCulled={false}
+        onPointerMove={(e) => {
+          e.stopPropagation()
+          const idx = e.instanceId ?? -1
+          if (idx === hoveredIndexRef.current) return
+          hoveredIndexRef.current = idx
+          dirtyRef.current = true
+          document.body.style.cursor = idx >= 0 ? 'pointer' : ''
+          const state = idx >= 0 ? statesRef.current[idx] : null
+          onHoverRef.current?.(state ?? null, e.clientX, e.clientY)
+        }}
+        onPointerLeave={() => {
+          if (hoveredIndexRef.current === -1) return
+          hoveredIndexRef.current = -1
+          dirtyRef.current = true
+          document.body.style.cursor = ''
+          onHoverRef.current?.(null, 0, 0)
+        }}
+        onClick={(e) => {
+          e.stopPropagation()
+          const idx = e.instanceId ?? -1
+          if (idx >= 0) {
+            const state = statesRef.current[idx]
+            if (state?.icao24) onClickRef.current?.(state.icao24)
+          }
+        }}
+      >
+        <meshBasicMaterial side={THREE.DoubleSide} vertexColors />
+      </instancedMesh>
+    </>
   )
 }
