@@ -1,0 +1,24 @@
+{
+  "projectName": "flytie",
+  "mode": "file-router",
+  "typescript": true,
+  "packageManager": "bun",
+  "includeExamples": false,
+  "tailwind": true,
+  "addOnOptions": {},
+  "envVarValues": {
+    "VITE_CONVEX_URL": "https://first-guineapig-949.convex.cloud"
+  },
+  "git": true,
+  "routerOnly": false,
+  "version": 1,
+  "framework": "react",
+  "chosenAddOns": [
+    "eslint",
+    "nitro",
+    "convex",
+    "compiler",
+    "shadcn",
+    "tanstack-query"
+  ]
+}
