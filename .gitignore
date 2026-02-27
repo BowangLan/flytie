@@ -12,3 +12,8 @@ dist-ssr
 __unconfig*
 todos.json
 .vercel
+
+
+credentials.json
+
+.content-collections
