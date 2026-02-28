@@ -1,6 +1,6 @@
 import { Text } from '@react-three/drei'
 import earcut from 'earcut'
-import { useMemo } from 'react'
+import { memo, useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
 
@@ -22,7 +22,6 @@ export function countryToMesh(
   z = 0,
 ): { geometry: THREE.BufferGeometry; color: string }[] | null {
   const { type, coordinates } = feature.geometry
-  if (type !== 'Polygon' && type !== 'MultiPolygon') return null
 
   const polygons: number[][][][] =
     type === 'Polygon'
@@ -125,36 +124,64 @@ export function getFeatureCentroid(feature: Feature): [number, number] {
   return count > 0 ? [sumLon / count, sumLat / count] : [0, 0]
 }
 
-export function Countries({
+function CountriesImpl({
   features,
   getColor,
 }: {
   features: Feature[]
   getColor?: GetColorFn
 }) {
+  const meshes = useMemo(
+    () =>
+      features.flatMap((feature, i) => {
+        const color = getColor?.(feature) ?? WORLD_MAP_COLORS.countryDefault
+        const countryMeshes = countryToMesh(feature, color)
+        if (!countryMeshes) return []
+        return countryMeshes.map((mesh, j) => ({
+          key: `${i}-${j}`,
+          ...mesh,
+        }))
+      }),
+    [features, getColor],
+  )
+
+  useEffect(
+    () => () => {
+      for (const mesh of meshes) {
+        mesh.geometry.dispose()
+      }
+    },
+    [meshes],
+  )
+
   return (
     <>
-      {features.map((feature, i) => {
-        const color = getColor?.(feature) ?? WORLD_MAP_COLORS.countryDefault
-        const meshes = countryToMesh(feature, color)
-
-        if (!meshes) return null
-
-        return meshes.map((m, j) => (
-          <mesh key={`${i}-${j}`} geometry={m.geometry}>
-            <meshBasicMaterial color={m.color} side={THREE.DoubleSide} />
+      {meshes.map((mesh) => {
+        return (
+          <mesh key={mesh.key} geometry={mesh.geometry}>
+            <meshBasicMaterial color={mesh.color} side={THREE.DoubleSide} />
           </mesh>
-        ))
+        )
       })}
     </>
   )
 }
 
-export function CountryOutlines({ features }: { features: Feature[] }) {
+export const Countries = memo(CountriesImpl)
+
+function CountryOutlinesImpl({ features }: { features: Feature[] }) {
   const geo = useMemo(
     () => (features.length > 0 ? buildCountryGeometry(features) : null),
     [features],
   )
+
+  useEffect(
+    () => () => {
+      geo?.dispose()
+    },
+    [geo],
+  )
+
   if (!geo) return null
 
   return (
@@ -164,27 +191,39 @@ export function CountryOutlines({ features }: { features: Feature[] }) {
   )
 }
 
-export function CountryLabels({ features }: { features: Feature[] }) {
+export const CountryOutlines = memo(CountryOutlinesImpl)
+
+function CountryLabelsImpl({ features }: { features: Feature[] }) {
+  const labels = useMemo(
+    () =>
+      features.flatMap((feature, i) => {
+        const name = feature.properties?.name
+        if (!name || name === 'Antarctica') return []
+        const [lon, lat] = getFeatureCentroid(feature)
+        return [{ key: i, name, lon, lat }]
+      }),
+    [features],
+  )
+
   return (
     <>
-      {features.map((feature, i) => {
-        const name = feature.properties?.name
-        if (!name || name === 'Antarctica') return null
-        const [lon, lat] = getFeatureCentroid(feature)
+      {labels.map((label) => {
         return (
           <Text
-            key={i}
-            position={[lon, lat, 0.5]}
+            key={label.key}
+            position={[label.lon, label.lat, 0.5]}
             fontSize={0.8}
             color={WORLD_MAP_COLORS.label}
             anchorX="center"
             anchorY="middle"
             fontStyle="italic"
           >
-            {name}
+            {label.name}
           </Text>
         )
       })}
     </>
   )
 }
+
+export const CountryLabels = memo(CountryLabelsImpl)

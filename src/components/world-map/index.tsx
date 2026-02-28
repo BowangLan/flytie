@@ -1,10 +1,15 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { MapControls } from '@react-three/drei'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  memo,
+  startTransition,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import * as THREE from 'three'
 import type { MapControls as MapControlsImpl } from 'three-stdlib'
-import { useAction } from 'convex/react'
-import { api } from '../../../convex/_generated/api'
 import type { AdsbAircraft } from './flights'
 import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
 import { Countries, CountryOutlines, CountryLabels } from './country'
@@ -15,12 +20,10 @@ import type { TooltipData } from './flight-tooltip'
 import { SelectedFlightRoute } from './selected-flight-route'
 import { SelectedFlightSheet } from './selected-flight-sheet'
 import { useSelectedFlightStore } from '#/store/selected-flight.store'
-import { useFlightsStore } from '#/store/flights-store'
 import { MapLegend } from './map-legend'
 import type { CameraState } from './map-legend'
-
-const GEOJSON_URL =
-  'https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson'
+import type { WorldMapDataSource } from './data-source'
+import { useWorldMapData } from './use-world-map-data'
 
 const WORLD_X = 180
 const WORLD_Y = 90
@@ -135,10 +138,20 @@ function CursorTracker({
 }) {
   const { camera, gl } = useThree()
   const onCursorMoveRef = useRef(onCursorMove)
-  onCursorMoveRef.current = onCursorMove
+
+  useEffect(() => {
+    onCursorMoveRef.current = onCursorMove
+  }, [onCursorMove])
 
   useEffect(() => {
     const el = gl.domElement
+    let frameId: number | null = null
+    let pendingCoord: { lon: number; lat: number } | null = null
+
+    const flush = () => {
+      frameId = null
+      onCursorMoveRef.current(pendingCoord)
+    }
 
     const onPointerMove = (e: PointerEvent) => {
       const cam = camera as THREE.OrthographicCamera
@@ -150,7 +163,8 @@ function CursorTracker({
         e.clientY < rect.top ||
         e.clientY > rect.bottom
       ) {
-        onCursorMoveRef.current(null)
+        pendingCoord = null
+        if (frameId === null) frameId = requestAnimationFrame(flush)
         return
       }
       const normX = (e.clientX - rect.left) / rect.width
@@ -167,11 +181,15 @@ function CursorTracker({
         -WORLD_Y,
         WORLD_Y,
       )
-      onCursorMoveRef.current({ lon, lat })
+      pendingCoord = { lon, lat }
+      if (frameId === null) frameId = requestAnimationFrame(flush)
     }
 
     document.addEventListener('pointermove', onPointerMove)
-    return () => document.removeEventListener('pointermove', onPointerMove)
+    return () => {
+      document.removeEventListener('pointermove', onPointerMove)
+      if (frameId !== null) cancelAnimationFrame(frameId)
+    }
   }, [camera, gl])
 
   return null
@@ -214,80 +232,24 @@ function CameraInfo({ onUpdate }: { onUpdate: (s: CameraState) => void }) {
 // ─── Scene ────────────────────────────────────────────────────────────────────
 
 function WorldScene({
+  aircraft,
+  features,
   getColor,
   onHover,
   onCameraUpdate,
   onCursorMove,
   onFlightClick,
 }: {
+  aircraft: AdsbAircraft[]
+  features: Feature[]
   getColor?: GetColorFn
   onHover?: (aircraft: AdsbAircraft | null, x: number, y: number) => void
   onCameraUpdate?: (s: CameraState) => void
   onCursorMove?: (coord: { lon: number; lat: number } | null) => void
   onFlightClick?: (icao24: string) => void
 }) {
-  const [features, setFeatures] = useState<Feature[]>([])
-  const [aircraft, setAircraft] = useState<AdsbAircraft[]>([])
   const controlsRef = useRef<MapControlsImpl>(null)
   const wheelPan = PAN_MODE === 'wheel'
-  const fetchAircraftAll = useAction(api.lib.adbsexchange.fetchAircraftAll)
-
-  const fetchParamsRef = useRef<{ lat: number; lon: number; dist: number }>({
-    lat: 0,
-    lon: 0,
-    dist: 500,
-  })
-
-  const { camera } = useThree()
-  useFrame(() => {
-    if (!(camera instanceof THREE.OrthographicCamera)) return
-    const halfW = camera.right / camera.zoom
-    const halfH = camera.top / camera.zoom
-    const lat = camera.position.y
-    const lon = camera.position.x
-    const dist = Math.max(100, 80 * Math.max(halfW, halfH))
-    fetchParamsRef.current = { lat, lon, dist }
-  })
-
-  useEffect(() => {
-    let cancelled = false
-    const pollTimeout: ReturnType<typeof setTimeout> | null = null
-
-    const poll = async () => {
-      try {
-        const res = await fetchAircraftAll()
-        if (cancelled) return
-        const data = JSON.parse(res) as { ac: AdsbAircraft[] }
-        setAircraft(data.ac)
-      } catch (e) {
-        console.error('ADSBExchange fetch failed:', e)
-      }
-      if (!cancelled) {
-        // pollTimeout = setTimeout(poll, 10_000)
-      }
-    }
-    poll()
-
-    return () => {
-      cancelled = true
-      if (pollTimeout) clearTimeout(pollTimeout)
-    }
-  }, [fetchAircraftAll])
-
-  // Load GeoJSON country data once.
-  useEffect(() => {
-    fetch(GEOJSON_URL)
-      .then((r) => r.json())
-      .then((d: { features: Feature[] }) => setFeatures(d.features))
-      .catch(console.error)
-  }, [])
-
-  const selectedIcao24 = useSelectedFlightStore((state) => state.selectedIcao24)
-
-  useEffect(() => {
-    const { setFlightsFromViewport } = useFlightsStore.getState()
-    setFlightsFromViewport(aircraft, selectedIcao24)
-  }, [aircraft, selectedIcao24])
 
   return (
     <>
@@ -315,7 +277,7 @@ function WorldScene({
         enableRotate={false}
         enableZoom={!wheelPan}
         dampingFactor={0.5}
-        zoomSpeed={0.7}
+        zoomSpeed={0.9}
         zoomToCursor
         screenSpacePanning
         enablePan
@@ -333,7 +295,78 @@ function WorldScene({
   )
 }
 
-export default function WorldMap({ getColor }: { getColor?: GetColorFn }) {
+const MemoWorldScene = memo(WorldScene)
+
+const WorldCanvas = memo(function WorldCanvas({
+  aircraft,
+  features,
+  getColor,
+  onHover,
+  onCameraUpdate,
+  onCursorMove,
+  onFlightClick,
+  onPointerMissed,
+}: {
+  aircraft: AdsbAircraft[]
+  features: Feature[]
+  getColor?: GetColorFn
+  onHover?: (aircraft: AdsbAircraft | null, x: number, y: number) => void
+  onCameraUpdate?: (s: CameraState) => void
+  onCursorMove?: (coord: { lon: number; lat: number } | null) => void
+  onFlightClick?: (icao24: string) => void
+  onPointerMissed?: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-0">
+      <Canvas
+        orthographic
+        camera={{ position: [0, 0, 100], zoom: 16 }}
+        dpr={[1, 1.5]}
+        gl={{ antialias: true, powerPreference: 'high-performance' }}
+        style={{ background: WORLD_MAP_COLORS.background }}
+        onPointerMissed={onPointerMissed}
+      >
+        <MemoWorldScene
+          aircraft={aircraft}
+          features={features}
+          getColor={getColor}
+          onHover={onHover}
+          onCameraUpdate={onCameraUpdate}
+          onCursorMove={onCursorMove}
+          onFlightClick={onFlightClick}
+        />
+      </Canvas>
+    </div>
+  )
+})
+
+function isSameCameraState(a: CameraState, b: CameraState) {
+  return (
+    a.lon[0] === b.lon[0] &&
+    a.lon[1] === b.lon[1] &&
+    a.lat[0] === b.lat[0] &&
+    a.lat[1] === b.lat[1] &&
+    a.zoom === b.zoom
+  )
+}
+
+function isSameCursorCoord(
+  a: { lon: number; lat: number } | null,
+  b: { lon: number; lat: number } | null,
+) {
+  if (a === b) return true
+  if (!a || !b) return false
+  return a.lon === b.lon && a.lat === b.lat
+}
+
+export default function WorldMap({
+  dataSource,
+  getColor,
+}: {
+  dataSource?: WorldMapDataSource
+  getColor?: GetColorFn
+}) {
+  const { aircraft, features } = useWorldMapData(dataSource)
   const [tooltip, setTooltip] = useState<TooltipData | null>(null)
   const [cursorCoord, setCursorCoord] = useState<{
     lon: number
@@ -345,18 +378,20 @@ export default function WorldMap({ getColor }: { getColor?: GetColorFn }) {
     zoom: 16,
   })
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cameraStateRef = useRef(cameraState)
+  const cursorCoordRef = useRef(cursorCoord)
   const setSelectedIcao24 = useSelectedFlightStore(
     (state) => state.setSelectedIcao24,
   )
 
   const handleHover = useCallback(
-    (aircraft: AdsbAircraft | null, x: number, y: number) => {
+    (nextAircraft: AdsbAircraft | null, x: number, y: number) => {
       if (hideTimerRef.current) {
         clearTimeout(hideTimerRef.current)
         hideTimerRef.current = null
       }
-      if (aircraft) {
-        setTooltip({ aircraft, x, y })
+      if (nextAircraft) {
+        setTooltip({ aircraft: nextAircraft, x, y })
       } else {
         hideTimerRef.current = setTimeout(() => setTooltip(null), 120)
       }
@@ -365,12 +400,20 @@ export default function WorldMap({ getColor }: { getColor?: GetColorFn }) {
   )
 
   const handleCameraUpdate = useCallback((s: CameraState) => {
-    setCameraState(s)
+    if (isSameCameraState(cameraStateRef.current, s)) return
+    cameraStateRef.current = s
+    startTransition(() => {
+      setCameraState(s)
+    })
   }, [])
 
   const handleCursorMove = useCallback(
     (coord: { lon: number; lat: number } | null) => {
-      setCursorCoord(coord)
+      if (isSameCursorCoord(cursorCoordRef.current, coord)) return
+      cursorCoordRef.current = coord
+      startTransition(() => {
+        setCursorCoord(coord)
+      })
     },
     [],
   )
@@ -382,25 +425,22 @@ export default function WorldMap({ getColor }: { getColor?: GetColorFn }) {
     [setSelectedIcao24],
   )
 
+  const handlePointerMissed = useCallback(() => {
+    setSelectedIcao24(null)
+  }, [setSelectedIcao24])
+
   return (
     <>
-      <div className="fixed inset-0 z-0">
-        <Canvas
-          orthographic
-          camera={{ position: [0, 0, 100], zoom: 16 }}
-          gl={{ antialias: true }}
-          style={{ background: WORLD_MAP_COLORS.background }}
-          onPointerMissed={() => setSelectedIcao24(null)}
-        >
-          <WorldScene
-            getColor={getColor}
-            onHover={handleHover}
-            onCameraUpdate={handleCameraUpdate}
-            onCursorMove={handleCursorMove}
-            onFlightClick={handleFlightClick}
-          />
-        </Canvas>
-      </div>
+      <WorldCanvas
+        aircraft={aircraft}
+        features={features}
+        getColor={getColor}
+        onHover={handleHover}
+        onCameraUpdate={handleCameraUpdate}
+        onCursorMove={handleCursorMove}
+        onFlightClick={handleFlightClick}
+        onPointerMissed={handlePointerMissed}
+      />
       {tooltip && (
         <FlightTooltip
           {...tooltip}
