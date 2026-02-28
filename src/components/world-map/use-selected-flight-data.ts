@@ -49,6 +49,7 @@ export function useSelectedFlightData() {
           return aTime.localeCompare(bTime)
         })
         const activeFlight = flights.filter((flight) => {
+          if (flight.status === "Arrived") return false
           // time looks like "2026-02-28 20:55Z"
           // filter out future flights & past flights
           const depTime = flight.departure.revisedTime?.utc ?? flight.departure.scheduledTime?.utc
@@ -61,7 +62,8 @@ export function useSelectedFlightData() {
         if (activeFlight.length === 0) {
           console.warn('[useSelectedFlightData] no active flights found', flights)
         }
-        setAerodataFlight(activeFlight[0] ?? flights[0] ?? null)
+        const fallbackFlight = flights.find((flight) => flight.status === "Arrived") ?? flights[0] ?? null
+        setAerodataFlight(activeFlight[0] ?? fallbackFlight)
       })
       .catch((err) => {
         setAerodataError(err instanceof Error ? err.message : 'Failed to load')
