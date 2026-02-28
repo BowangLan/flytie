@@ -6,7 +6,7 @@ import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
 const MARKER_SIZE_PX = 22
 const MARKER_MIN_SIZE_PX = 18
 const MARKER_MAX_SIZE_PX = 28
-const ANGLE_OFFSET = 70
+const ANGLE_OFFSET = -0
 const ROUTE_STEPS = 64
 
 const PLANE_SVG_PATH =
@@ -214,7 +214,7 @@ export function createWorldMapLayers({
       iconMapping: PLANE_ICON_MAPPING,
       getIcon: () => 'plane',
       getPosition: (item) => [item.lon, item.lat],
-      getAngle: (item) => item.track - ANGLE_OFFSET,
+      getAngle: (item) => -item.track,
       getColor: (item) =>
         getMarkerBorderColor(item, selectedIcao24, hoveredIcao24),
       getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
@@ -236,7 +236,7 @@ export function createWorldMapLayers({
       iconMapping: PLANE_ICON_MAPPING,
       getIcon: () => 'plane',
       getPosition: (item) => [item.lon, item.lat],
-      getAngle: (item) => item.track - ANGLE_OFFSET,
+      getAngle: (item) => -item.track,
       getColor: (item) => getMarkerColor(item, selectedIcao24, hoveredIcao24),
       getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
       sizeUnits: 'pixels',
@@ -261,7 +261,7 @@ export function createWorldMapLayers({
       iconMapping: PLANE_ICON_MAPPING,
       getIcon: () => 'plane',
       getPosition: (item) => [item.lon, item.lat],
-      getAngle: (item) => item.track - ANGLE_OFFSET,
+      getAngle: (item) => -item.track,
       getColor: (item) =>
         getMarkerBorderColor(item, selectedIcao24, hoveredIcao24),
       getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
@@ -283,7 +283,7 @@ export function createWorldMapLayers({
       iconMapping: PLANE_ICON_MAPPING,
       getIcon: () => 'plane',
       getPosition: (item) => [item.lon, item.lat],
-      getAngle: (item) => item.track - ANGLE_OFFSET,
+      getAngle: (item) => -item.track,
       getColor: (item) => getMarkerColor(item, selectedIcao24, hoveredIcao24),
       getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
       sizeUnits: 'pixels',
