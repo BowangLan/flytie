@@ -20,11 +20,23 @@ function formatCoord(v: number, pos: string, neg: string): string {
   return `${Math.abs(v).toFixed(2)}\u00B0\u202f${v >= 0 ? pos : neg}`
 }
 
-function formatRange(min: number, max: number, pos: string, neg: string): string {
+function formatRange(
+  min: number,
+  max: number,
+  pos: string,
+  neg: string,
+): string {
   return `${formatCoord(min, pos, neg)} - ${formatCoord(max, pos, neg)}`
 }
 
-export function MapLegend({ lon, lat, zoom }: CameraState) {
+export function MapLegend({
+  lon,
+  lat,
+  zoom,
+  cursor,
+}: CameraState & {
+  cursor?: { lon: number; lat: number } | null
+}) {
   const centerLat = (lat[0] + lat[1]) / 2
   // km per pixel at the current latitude (horizontal, along a parallel)
   const kmPerPx = (1 / zoom) * 111.32 * Math.cos((centerLat * Math.PI) / 180)
@@ -35,12 +47,25 @@ export function MapLegend({ lon, lat, zoom }: CameraState) {
   return (
     <div
       className="fixed bottom-4 left-4 z-10 flex flex-col gap-2 select-none rounded px-3 py-2 text-xs font-mono"
-      style={{ background: 'rgba(10,10,10,0.78)', color: WORLD_MAP_COLORS.label, border: `1px solid ${WORLD_MAP_COLORS.outline}` }}
+      style={{
+        background: 'rgba(10,10,10,0.78)',
+        color: WORLD_MAP_COLORS.label,
+        border: `1px solid ${WORLD_MAP_COLORS.outline}`,
+      }}
     >
       <div className="flex flex-col gap-1">
         <span>Lat: {formatRange(lat[0], lat[1], 'N', 'S')}</span>
         <span>Lon: {formatRange(lon[0], lon[1], 'E', 'W')}</span>
       </div>
+
+      {cursor && (
+        <div className="flex flex-col gap-1 border-t border-white/10 pt-1">
+          <span>
+            Cursor: {formatCoord(cursor.lat, 'N', 'S')},{' '}
+            {formatCoord(cursor.lon, 'E', 'W')}
+          </span>
+        </div>
+      )}
 
       <div className="flex flex-col gap-1">
         <div

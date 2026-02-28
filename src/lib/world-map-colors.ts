@@ -1,4 +1,4 @@
-import { COLORS } from "./colors";
+import { COLORS } from './colors'
 
 export const WORLD_MAP_COLORS = {
   background: COLORS.NEUTRAL_900,

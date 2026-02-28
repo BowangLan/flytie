@@ -1,33 +1,30 @@
 import { create } from 'zustand'
-import type { OpenSkyRouteDetail } from '../../convex/states'
 import { useMemo } from 'react'
+import type { AerodataboxFlight } from '../../convex/lib/aerodatabox'
 
 export type SelectedFlightState = {
   selectedIcao24: string | null
   setSelectedIcao24: (icao24: string | null) => void
-  flightDetail: OpenSkyRouteDetail | null
-  setFlightDetail: (detail: OpenSkyRouteDetail | null) => void
-  isFetchingFlightDetail: boolean
-  setIsFetchingFlightDetail: (v: boolean) => void
+  aerodataFlight: AerodataboxFlight | null
+  aerodataLoading: boolean
+  aerodataError: string | null
+  setAerodataFlight: (flight: AerodataboxFlight | null) => void
+  setAerodataLoading: (loading: boolean) => void
+  setAerodataError: (error: string | null) => void
 }
 
 export const useSelectedFlightStore = create<SelectedFlightState>()((set) => ({
   selectedIcao24: null,
-  setSelectedIcao24: (icao24) =>
-    set({
-      selectedIcao24: icao24,
-      ...(icao24 === null && {
-        flightDetail: null,
-        isFetchingFlightDetail: false,
-      }),
-    }),
-  flightDetail: null,
-  setFlightDetail: (detail) => set({ flightDetail: detail }),
-  isFetchingFlightDetail: false,
-  setIsFetchingFlightDetail: (v) => set({ isFetchingFlightDetail: v }),
+  setSelectedIcao24: (icao24) => set({ selectedIcao24: icao24 }),
+  aerodataFlight: null,
+  aerodataLoading: false,
+  aerodataError: null,
+  setAerodataFlight: (flight) => set({ aerodataFlight: flight }),
+  setAerodataLoading: (loading) => set({ aerodataLoading: loading }),
+  setAerodataError: (error) => set({ aerodataError: error }),
 }))
 
 export const useIsFlightSelected = (icao24: string) => {
   const selectedIcao24 = useSelectedFlightStore((state) => state.selectedIcao24)
-  return useMemo(() => selectedIcao24 === icao24, [selectedIcao24, icao24]) ?? false
+  return useMemo(() => selectedIcao24 === icao24, [selectedIcao24, icao24])
 }

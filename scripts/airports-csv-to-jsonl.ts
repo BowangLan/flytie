@@ -5,10 +5,11 @@
  * Run: bun run scripts/airports-csv-to-jsonl.ts
  */
 
-import { readFileSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
-const CSV_URL = 'https://raw.githubusercontent.com/davidmegginson/ourairports-data/main/airports.csv'
+const CSV_URL =
+  'https://raw.githubusercontent.com/davidmegginson/ourairports-data/main/airports.csv'
 const OUT_PATH = join(import.meta.dir, '../convex/data/airports.jsonl')
 
 const NUMERIC_FIELDS = new Set([

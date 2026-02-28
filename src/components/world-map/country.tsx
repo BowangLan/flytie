@@ -19,13 +19,15 @@ export type GetColorFn = (feature: Feature) => string
 export function countryToMesh(
   feature: Feature,
   color: string = WORLD_MAP_COLORS.countryFallback,
-  z = 0
+  z = 0,
 ): { geometry: THREE.BufferGeometry; color: string }[] | null {
   const { type, coordinates } = feature.geometry
   if (type !== 'Polygon' && type !== 'MultiPolygon') return null
 
   const polygons: number[][][][] =
-    type === 'Polygon' ? [coordinates as number[][][]] : (coordinates as number[][][][])
+    type === 'Polygon'
+      ? [coordinates as number[][][]]
+      : (coordinates as number[][][][])
 
   const result: { geometry: THREE.BufferGeometry; color: string }[] = []
 
@@ -51,10 +53,14 @@ export function countryToMesh(
       offset += hole.length
     }
 
-    const indices = earcut(flat2d, holeIndices.length > 0 ? holeIndices : undefined, 2)
+    const indices = earcut(
+      flat2d,
+      holeIndices.length > 0 ? holeIndices : undefined,
+      2,
+    )
     const positions: number[] = []
     for (let i = 0; i < flat2d.length; i += 2) {
-      positions.push(flat2d[i]!, flat2d[i + 1]!, z)
+      positions.push(flat2d[i], flat2d[i + 1], z)
     }
 
     const geo = new THREE.BufferGeometry()
@@ -79,20 +85,32 @@ export function buildCountryGeometry(features: Feature[]) {
     for (const polygon of polygons) {
       for (const ring of polygon) {
         for (let i = 0; i < ring.length - 1; i++) {
-          positions.push(ring[i][0], ring[i][1], 0, ring[i + 1][0], ring[i + 1][1], 0)
+          positions.push(
+            ring[i][0],
+            ring[i][1],
+            0,
+            ring[i + 1][0],
+            ring[i + 1][1],
+            0,
+          )
         }
       }
     }
   }
   const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
+  geo.setAttribute(
+    'position',
+    new THREE.BufferAttribute(new Float32Array(positions), 3),
+  )
   return geo
 }
 
 export function getFeatureCentroid(feature: Feature): [number, number] {
   const { type, coordinates } = feature.geometry
   const polygons: number[][][][] =
-    type === 'Polygon' ? [coordinates as number[][][]] : (coordinates as number[][][][])
+    type === 'Polygon'
+      ? [coordinates as number[][][]]
+      : (coordinates as number[][][][])
   let sumLon = 0
   let sumLat = 0
   let count = 0

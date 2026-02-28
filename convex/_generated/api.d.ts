@@ -9,7 +9,9 @@
  */
 
 import type * as airports from "../airports.js";
-import type * as flights from "../flights.js";
+import type * as lib_adbsexchange from "../lib/adbsexchange.js";
+import type * as lib_aerodatabox from "../lib/aerodatabox.js";
+import type * as lib_opensky from "../lib/opensky.js";
 import type * as states from "../states.js";
 import type * as statesTypes from "../statesTypes.js";
 import type * as todos from "../todos.js";
@@ -22,7 +24,9 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   airports: typeof airports;
-  flights: typeof flights;
+  "lib/adbsexchange": typeof lib_adbsexchange;
+  "lib/aerodatabox": typeof lib_aerodatabox;
+  "lib/opensky": typeof lib_opensky;
   states: typeof states;
   statesTypes: typeof statesTypes;
   todos: typeof todos;

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js'
-import type { State } from 'convex/statesTypes'
+import type { AdsbAircraft } from './flights'
 import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
 import { useSelectedFlightStore } from '@/store/selected-flight.store'
 
@@ -86,8 +86,8 @@ function buildMarkerGeometry(): THREE.BufferGeometry {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface FlightMarkersProps {
-  states: State[]
-  onHover?: (state: State | null, x: number, y: number) => void
+  aircraft: AdsbAircraft[]
+  onHover?: (aircraft: AdsbAircraft | null, x: number, y: number) => void
   onClick?: (icao24: string) => void
 }
 
@@ -95,15 +95,19 @@ interface FlightMarkersProps {
  * Renders all aircraft as instanced filled plane silhouettes on the world map.
  * Each plane is rotated to match the aircraft's true track.
  */
-export function FlightMarkers({ states, onHover, onClick }: FlightMarkersProps) {
+export function FlightMarkers({
+  aircraft,
+  onHover,
+  onClick,
+}: FlightMarkersProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null)
   const borderMeshRef = useRef<THREE.InstancedMesh>(null)
   const geometry = useMemo(buildMarkerGeometry, [])
   const { camera } = useThree()
 
-  // Keep states accessible inside useFrame without a stale closure.
-  const statesRef = useRef(states)
-  statesRef.current = states
+  // Keep aircraft accessible inside useFrame without a stale closure.
+  const aircraftRef = useRef(aircraft)
+  aircraftRef.current = aircraft
 
   const onHoverRef = useRef(onHover)
   onHoverRef.current = onHover
@@ -122,10 +126,13 @@ export function FlightMarkers({ states, onHover, onClick }: FlightMarkersProps) 
   /** Index of the currently hovered instance, or -1 for none. */
   const hoveredIndexRef = useRef(-1)
 
-  // Mark dirty whenever the states array or selection changes.
+  // Mark dirty whenever the aircraft array or selection changes.
+  // Also reset hover state so it doesn't get stuck if onPointerLeave didn't fire
+  // (e.g. when the sheet closed without the pointer actually leaving the marker).
   useEffect(() => {
+    hoveredIndexRef.current = -1
     dirtyRef.current = true
-  }, [states, selectedIcao24])
+  }, [aircraft, selectedIcao24])
 
   useFrame(() => {
     const mesh = meshRef.current
@@ -147,13 +154,13 @@ export function FlightMarkers({ states, onHover, onClick }: FlightMarkersProps) 
     if (!dirtyRef.current) return
     dirtyRef.current = false
 
-    const cur = statesRef.current
+    const cur = aircraftRef.current
     for (let i = 0; i < cur.length; i++) {
-      const state = cur[i]!
+      const ac = cur[i]
 
-      scratch.position.set(state.longitude, state.latitude, MARKER_Z)
-      // trueTrack is clockwise from north; Three.js Z-rotation is counter-clockwise.
-      scratch.rotation.z = -THREE.MathUtils.degToRad(state.trueTrack ?? 0)
+      scratch.position.set(ac.lon, ac.lat, MARKER_Z)
+      // track is clockwise from north; Three.js Z-rotation is counter-clockwise.
+      scratch.rotation.z = -THREE.MathUtils.degToRad(ac.track)
 
       // Border: slightly larger, rendered behind
       scratch.scale.setScalar(lastScaleRef.current * BORDER_SCALE)
@@ -165,7 +172,7 @@ export function FlightMarkers({ states, onHover, onClick }: FlightMarkersProps) 
       scratch.scale.setScalar(lastScaleRef.current)
       scratch.updateMatrix()
       mesh.setMatrixAt(i, scratch.matrix)
-      const isSelected = state.icao24 === selectedIcao24Ref.current
+      const isSelected = ac.hex.toLowerCase() === selectedIcao24Ref.current
       const isHovered = i === hoveredIndexRef.current
       const fillColor = isSelected
         ? COLOR_MARKER_SELECTED
@@ -181,22 +188,23 @@ export function FlightMarkers({ states, onHover, onClick }: FlightMarkersProps) 
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
   })
 
-  if (states.length === 0) return null
+  if (aircraft.length === 0) return null
 
   return (
     <>
       {/* Border: rendered first so it appears behind the fill */}
       <instancedMesh
         ref={borderMeshRef}
-        args={[geometry, undefined, states.length]}
+        args={[geometry, undefined, aircraft.length]}
         frustumCulled={false}
+        raycast={() => {}}
       >
         <meshBasicMaterial side={THREE.DoubleSide} vertexColors />
       </instancedMesh>
       {/* Fill — pointer events for hover detection */}
       <instancedMesh
         ref={meshRef}
-        args={[geometry, undefined, states.length]}
+        args={[geometry, undefined, aircraft.length]}
         frustumCulled={false}
         onPointerMove={(e) => {
           e.stopPropagation()
@@ -205,8 +213,8 @@ export function FlightMarkers({ states, onHover, onClick }: FlightMarkersProps) 
           hoveredIndexRef.current = idx
           dirtyRef.current = true
           document.body.style.cursor = idx >= 0 ? 'pointer' : ''
-          const state = idx >= 0 ? statesRef.current[idx] : null
-          onHoverRef.current?.(state ?? null, e.clientX, e.clientY)
+          const ac = idx >= 0 ? aircraftRef.current[idx] : null
+          onHoverRef.current?.(ac ?? null, e.clientX, e.clientY)
         }}
         onPointerLeave={() => {
           if (hoveredIndexRef.current === -1) return
@@ -219,8 +227,8 @@ export function FlightMarkers({ states, onHover, onClick }: FlightMarkersProps) 
           e.stopPropagation()
           const idx = e.instanceId ?? -1
           if (idx >= 0) {
-            const state = statesRef.current[idx]
-            if (state?.icao24) onClickRef.current?.(state.icao24)
+            const ac = aircraftRef.current[idx]
+            if (ac) onClickRef.current?.(ac.hex.toLowerCase())
           }
         }}
       >

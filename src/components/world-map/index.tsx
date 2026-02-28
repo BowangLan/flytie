@@ -3,24 +3,21 @@ import { MapControls } from '@react-three/drei'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type { MapControls as MapControlsImpl } from 'three-stdlib'
-import { useQuery } from 'convex/react'
+import { useAction } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
+import type { AdsbAircraft } from './flights'
 import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
-import {
-  type Feature,
-  type GetColorFn,
-  Countries,
-  CountryOutlines,
-  CountryLabels,
-} from './country'
+import { Countries, CountryOutlines, CountryLabels } from './country'
+import type { Feature, GetColorFn } from './country'
 import { FlightMarkers } from './flight-markers'
-import { FlightTooltip, type TooltipData } from './flight-tooltip'
+import { FlightTooltip } from './flight-tooltip'
+import type { TooltipData } from './flight-tooltip'
 import { SelectedFlightRoute } from './selected-flight-route'
-import type { State } from 'convex/statesTypes'
 import { SelectedFlightSheet } from './selected-flight-sheet'
 import { useSelectedFlightStore } from '#/store/selected-flight.store'
 import { useFlightsStore } from '#/store/flights-store'
-import { MapLegend, type CameraState } from './map-legend'
+import { MapLegend } from './map-legend'
+import type { CameraState } from './map-legend'
 
 const GEOJSON_URL =
   'https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson'
@@ -129,6 +126,57 @@ function WheelPan({
   return null
 }
 
+/** Converts pointer position to lon/lat and reports via callback. Uses document-level
+ *  pointermove so we get events even when overlays (tooltip, sheet) may block the canvas. */
+function CursorTracker({
+  onCursorMove,
+}: {
+  onCursorMove: (coord: { lon: number; lat: number } | null) => void
+}) {
+  const { camera, gl } = useThree()
+  const onCursorMoveRef = useRef(onCursorMove)
+  onCursorMoveRef.current = onCursorMove
+
+  useEffect(() => {
+    const el = gl.domElement
+
+    const onPointerMove = (e: PointerEvent) => {
+      const cam = camera as THREE.OrthographicCamera
+      if (!cam.isOrthographicCamera) return
+      const rect = el.getBoundingClientRect()
+      if (
+        e.clientX < rect.left ||
+        e.clientX > rect.right ||
+        e.clientY < rect.top ||
+        e.clientY > rect.bottom
+      ) {
+        onCursorMoveRef.current(null)
+        return
+      }
+      const normX = (e.clientX - rect.left) / rect.width
+      const normY = (e.clientY - rect.top) / rect.height
+      const halfW = cam.right / cam.zoom
+      const halfH = cam.top / cam.zoom
+      const lon = THREE.MathUtils.clamp(
+        cam.position.x - halfW + normX * (2 * halfW),
+        -WORLD_X,
+        WORLD_X,
+      )
+      const lat = THREE.MathUtils.clamp(
+        cam.position.y + halfH - normY * (2 * halfH),
+        -WORLD_Y,
+        WORLD_Y,
+      )
+      onCursorMoveRef.current({ lon, lat })
+    }
+
+    document.addEventListener('pointermove', onPointerMove)
+    return () => document.removeEventListener('pointermove', onPointerMove)
+  }, [camera, gl])
+
+  return null
+}
+
 /** Reads camera position+zoom each frame; calls onUpdate only when values change. */
 function CameraInfo({ onUpdate }: { onUpdate: (s: CameraState) => void }) {
   const { camera } = useThree()
@@ -165,29 +213,66 @@ function CameraInfo({ onUpdate }: { onUpdate: (s: CameraState) => void }) {
 
 // ─── Scene ────────────────────────────────────────────────────────────────────
 
-function tryParseJson<T>(json: unknown): T | null {
-  if (typeof json !== 'string') return null
-  return JSON.parse(json) as T
-}
-
 function WorldScene({
   getColor,
   onHover,
   onCameraUpdate,
+  onCursorMove,
   onFlightClick,
 }: {
   getColor?: GetColorFn
-  onHover?: (state: State | null, x: number, y: number) => void
+  onHover?: (aircraft: AdsbAircraft | null, x: number, y: number) => void
   onCameraUpdate?: (s: CameraState) => void
+  onCursorMove?: (coord: { lon: number; lat: number } | null) => void
   onFlightClick?: (icao24: string) => void
 }) {
   const [features, setFeatures] = useState<Feature[]>([])
+  const [aircraft, setAircraft] = useState<AdsbAircraft[]>([])
   const controlsRef = useRef<MapControlsImpl>(null)
   const wheelPan = PAN_MODE === 'wheel'
+  const fetchAircraftAll = useAction(api.lib.adbsexchange.fetchAircraftAll)
 
-  // Live flight data via Convex — auto-updates when the DB changes.
-  const statesRaw = useQuery(api.states.list) ?? '[]'
-  const states = tryParseJson<State[]>(statesRaw) ?? []
+  const fetchParamsRef = useRef<{ lat: number; lon: number; dist: number }>({
+    lat: 0,
+    lon: 0,
+    dist: 500,
+  })
+
+  const { camera } = useThree()
+  useFrame(() => {
+    if (!(camera instanceof THREE.OrthographicCamera)) return
+    const halfW = camera.right / camera.zoom
+    const halfH = camera.top / camera.zoom
+    const lat = camera.position.y
+    const lon = camera.position.x
+    const dist = Math.max(100, 80 * Math.max(halfW, halfH))
+    fetchParamsRef.current = { lat, lon, dist }
+  })
+
+  useEffect(() => {
+    let cancelled = false
+    const pollTimeout: ReturnType<typeof setTimeout> | null = null
+
+    const poll = async () => {
+      try {
+        const res = await fetchAircraftAll()
+        if (cancelled) return
+        const data = JSON.parse(res) as { ac: AdsbAircraft[] }
+        setAircraft(data.ac)
+      } catch (e) {
+        console.error('ADSBExchange fetch failed:', e)
+      }
+      if (!cancelled) {
+        // pollTimeout = setTimeout(poll, 10_000)
+      }
+    }
+    poll()
+
+    return () => {
+      cancelled = true
+      if (pollTimeout) clearTimeout(pollTimeout)
+    }
+  }, [fetchAircraftAll])
 
   // Load GeoJSON country data once.
   useEffect(() => {
@@ -197,26 +282,12 @@ function WorldScene({
       .catch(console.error)
   }, [])
 
+  const selectedIcao24 = useSelectedFlightStore((state) => state.selectedIcao24)
+
   useEffect(() => {
-    // sync it to flights store
-    const flightsStore = useFlightsStore.getState()
-    flightsStore.addFlights(states)
-  }, [states])
-
-  console.log(
-    'states with departure and arrival',
-    states.filter(
-      (state) => state.estDepartureAirport || state.estArrivalAirport,
-    ),
-  )
-
-  // Trigger the Convex refresh action on an interval.
-  // All connected clients share the result via the Convex query subscription.
-  // useEffect(() => {
-  //   void refreshStates()
-  //   const id = setInterval(() => void refreshStates(), FLIGHT_POLL_INTERVAL_MS)
-  //   return () => clearInterval(id)
-  // }, [refreshStates])
+    const { setFlightsFromViewport } = useFlightsStore.getState()
+    setFlightsFromViewport(aircraft, selectedIcao24)
+  }, [aircraft, selectedIcao24])
 
   return (
     <>
@@ -234,7 +305,7 @@ function WorldScene({
 
       {/* Live flight markers */}
       <FlightMarkers
-        states={states}
+        aircraft={aircraft}
         onHover={onHover}
         onClick={onFlightClick}
       />
@@ -244,6 +315,8 @@ function WorldScene({
         enableRotate={false}
         enableZoom={!wheelPan}
         dampingFactor={0.5}
+        zoomSpeed={0.7}
+        zoomToCursor
         screenSpacePanning
         enablePan
         mouseButtons={{
@@ -255,12 +328,17 @@ function WorldScene({
       {wheelPan && <WheelPan controlsRef={controlsRef} />}
       <CameraConstraints controlsRef={controlsRef} />
       {onCameraUpdate && <CameraInfo onUpdate={onCameraUpdate} />}
+      {onCursorMove && <CursorTracker onCursorMove={onCursorMove} />}
     </>
   )
 }
 
 export default function WorldMap({ getColor }: { getColor?: GetColorFn }) {
   const [tooltip, setTooltip] = useState<TooltipData | null>(null)
+  const [cursorCoord, setCursorCoord] = useState<{
+    lon: number
+    lat: number
+  } | null>(null)
   const [cameraState, setCameraState] = useState<CameraState>({
     lon: [0, 0],
     lat: [0, 0],
@@ -272,13 +350,13 @@ export default function WorldMap({ getColor }: { getColor?: GetColorFn }) {
   )
 
   const handleHover = useCallback(
-    (state: State | null, x: number, y: number) => {
+    (aircraft: AdsbAircraft | null, x: number, y: number) => {
       if (hideTimerRef.current) {
         clearTimeout(hideTimerRef.current)
         hideTimerRef.current = null
       }
-      if (state) {
-        setTooltip({ state, x, y })
+      if (aircraft) {
+        setTooltip({ aircraft, x, y })
       } else {
         hideTimerRef.current = setTimeout(() => setTooltip(null), 120)
       }
@@ -289,6 +367,13 @@ export default function WorldMap({ getColor }: { getColor?: GetColorFn }) {
   const handleCameraUpdate = useCallback((s: CameraState) => {
     setCameraState(s)
   }, [])
+
+  const handleCursorMove = useCallback(
+    (coord: { lon: number; lat: number } | null) => {
+      setCursorCoord(coord)
+    },
+    [],
+  )
 
   const handleFlightClick = useCallback(
     (icao24: string) => {
@@ -305,11 +390,13 @@ export default function WorldMap({ getColor }: { getColor?: GetColorFn }) {
           camera={{ position: [0, 0, 100], zoom: 16 }}
           gl={{ antialias: true }}
           style={{ background: WORLD_MAP_COLORS.background }}
+          onPointerMissed={() => setSelectedIcao24(null)}
         >
           <WorldScene
             getColor={getColor}
             onHover={handleHover}
             onCameraUpdate={handleCameraUpdate}
+            onCursorMove={handleCursorMove}
             onFlightClick={handleFlightClick}
           />
         </Canvas>
@@ -328,7 +415,7 @@ export default function WorldMap({ getColor }: { getColor?: GetColorFn }) {
           }}
         />
       )}
-      <MapLegend {...cameraState} />
+      <MapLegend {...cameraState} cursor={cursorCoord} />
 
       <SelectedFlightSheet />
     </>

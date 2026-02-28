@@ -5,83 +5,18 @@ import { api, internal } from './_generated/api'
 import { v } from 'convex/values'
 import { stateDataFields } from './statesTypes'
 import type { State } from './statesTypes'
-
-const OPENSKY_API_BASE = 'https://opensky-network.org/api'
-const OPENSKY_AUTH_URL =
-  'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token'
-
-/** Fetches a fresh access token from OpenSky using client credentials. */
-async function getOpenSkyToken(): Promise<string> {
-  const clientId = process.env.OPENSKY_CLIENT_ID
-  const clientSecret = process.env.OPENSKY_CLIENT_SECRET
-  if (!clientId || !clientSecret) {
-    throw new Error('OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET must be set')
-  }
-
-  const params = new URLSearchParams({
-    grant_type: 'client_credentials',
-    client_id: clientId,
-    client_secret: clientSecret,
-  })
-
-  const res = await fetch(OPENSKY_AUTH_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString(),
-  })
-
-  if (!res.ok) throw new Error(`OpenSky auth failed: ${res.status}`)
-
-  const data = (await res.json()) as { access_token: string }
-  return data.access_token
-}
-
-/** Fetches from OpenSky API with a fresh token.
- *  Path is relative to /api/ (e.g. "states/all").
- *  Params are optional query string parameters.
- */
-async function fetchOpenSky<T>(
-  path: string,
-  params?: Record<string, string | number>,
-): Promise<T> {
-  const token = await getOpenSkyToken()
-  const base = `${OPENSKY_API_BASE}/${path.replace(/^\//, '')}`
-  const search = params
-    ? '?' +
-      new URLSearchParams(
-        Object.fromEntries(
-          Object.entries(params).map(([k, v]) => [k, String(v)]),
-        ),
-      ).toString()
-    : ''
-  const url = base + search
-
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-
-  if (!res.ok) throw new Error(`OpenSky API error: ${res.status}`)
-
-  return (await res.json()) as T
-}
-
-// ─── OpenSky API wrappers ──────────────────────────────────────────────────────
-
-/** Raw flight object from OpenSky /flights/all. */
-interface OpenSkyFlight {
-  icao24: string
-  firstSeen: number
-  estDepartureAirport: string | null
-  lastSeen: number
-  estArrivalAirport: string | null
-  callsign?: string | null
-  estDepartureAirportHorizDistance?: number
-  estDepartureAirportVertDistance?: number
-  estArrivalAirportHorizDistance?: number
-  estArrivalAirportVertDistance?: number
-  departureAirportCandidatesCount?: number
-  arrivalAirportCandidatesCount?: number
-}
+import {
+  fetchOpenSky,
+  fetchFlightsAll,
+  fetchFlightsAircraft,
+  fetchTrack,
+} from './lib/opensky'
+import type {
+  OpenSkyFlight,
+  OpenSkyResponse,
+  RawStateVector,
+  OpenSkyTrack,
+} from './lib/opensky'
 
 type RouteAirportDetails = {
   ident: string
@@ -101,74 +36,11 @@ export type OpenSkyRouteDetail = {
   estArrivalAirport: string | null
   departureAirport: RouteAirportDetails | null
   arrivalAirport: RouteAirportDetails | null
-}
-
-/** Fetches flights for a time interval [begin, end]. Max 2 hours per OpenSky API. Returns [] on 404. */
-async function fetchFlightsAll(
-  begin: number,
-  end: number,
-): Promise<OpenSkyFlight[]> {
-  const token = await getOpenSkyToken()
-  const url = `${OPENSKY_API_BASE}/flights/all?begin=${begin}&end=${end}`
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (res.status === 404) return []
-  if (!res.ok) throw new Error(`OpenSky flights API error: ${res.status}`)
-  return (await res.json()) as OpenSkyFlight[]
-}
-
-/** Fetches flights for one aircraft for [begin, end]. Returns [] on 404. */
-async function fetchFlightsAircraft(
-  icao24: string,
-  begin: number,
-  end: number,
-): Promise<OpenSkyFlight[]> {
-  const token = await getOpenSkyToken()
-  const url =
-    `${OPENSKY_API_BASE}/flights/aircraft` +
-    `?icao24=${encodeURIComponent(icao24)}&begin=${begin}&end=${end}`
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (res.status === 404) return []
-  if (!res.ok)
-    throw new Error(
-      `OpenSky flights/aircraft API error: ${res.status}: ${await res.text()}`,
-    )
-  return (await res.json()) as OpenSkyFlight[]
+  track: OpenSkyTrack | null
 }
 
 /** How many states to insert / delete in a single mutation call. */
 const BATCH_SIZE = 1000
-
-// ─── Raw OpenSky types ────────────────────────────────────────────────────────
-
-type RawStateVector = [
-  /* 0  */ icao24: string,
-  /* 1  */ callsign: string | null,
-  /* 2  */ originCountry: string,
-  /* 3  */ timePosition: number | null,
-  /* 4  */ lastContact: number,
-  /* 5  */ longitude: number | null,
-  /* 6  */ latitude: number | null,
-  /* 7  */ baroAltitude: number | null,
-  /* 8  */ onGround: boolean,
-  /* 9  */ velocity: number | null,
-  /* 10 */ trueTrack: number | null,
-  /* 11 */ verticalRate: number | null,
-  /* 12 */ sensors: number[] | null,
-  /* 13 */ geoAltitude: number | null,
-  /* 14 */ squawk: string | null,
-  /* 15 */ spi: boolean,
-  /* 16 */ positionSource: number,
-  /* 17 */ category: number,
-]
-
-interface OpenSkyResponse {
-  time: number
-  states: RawStateVector[] | null
-}
 
 // ─── Parsing ──────────────────────────────────────────────────────────────────
 
@@ -438,6 +310,11 @@ export const fetchFlightDetailFromOpenSky = action({
     const flights = await fetchFlightsAircraft(icao24, beginSec, nowSec)
     if (flights.length === 0) return null
 
+    console.log(
+      '[fetchFlightDetailFromOpenSky] flights fetched from OpenSky:',
+      flights.length,
+    )
+
     const sorted = [...flights].sort((a, b) => b.lastSeen - a.lastSeen)
     const best =
       sorted.find((f) => f.estDepartureAirport || f.estArrivalAirport) ??
@@ -468,6 +345,10 @@ export const fetchFlightDetailFromOpenSky = action({
       )
     }
 
+    // Fetch track: time=0 for live, or lastSeen for historical
+    const trackTime = best.lastSeen > nowSec - 3600 ? 0 : best.lastSeen
+    const track = await fetchTrack(icao24, trackTime)
+
     return {
       icao24,
       firstSeen: best.firstSeen,
@@ -496,6 +377,7 @@ export const fetchFlightDetailFromOpenSky = action({
             longitude_deg: arrivalAirport.longitude_deg,
           }
         : null,
+      track,
     }
   },
 })

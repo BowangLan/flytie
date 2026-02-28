@@ -14,7 +14,8 @@ export const PositionSource = {
   FLARM: 3,
 } as const
 
-export type PositionSource = (typeof PositionSource)[keyof typeof PositionSource]
+export type PositionSource =
+  (typeof PositionSource)[keyof typeof PositionSource]
 
 // ─── Domain type ──────────────────────────────────────────────────────────────
 

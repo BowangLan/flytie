@@ -1,29 +1,52 @@
-import type { Flight } from '#/components/world-map/flights'
+import type { AdsbAircraft } from '#/components/world-map/flights'
 import { create } from 'zustand'
 
 export type FlightsState = {
-  map: Map<string, Flight> // icao24 -> Flight
+  map: Map<string, AdsbAircraft> // icao24 -> aircraft
 }
 
 export type FlightsAction = {
-  addFlights: (flights: Flight[]) => void
+  addFlights: (aircraft: AdsbAircraft[]) => void
+  /** Replaces store with viewport aircraft; preserves the selected flight if it's no longer in view. */
+  setFlightsFromViewport: (
+    aircraft: AdsbAircraft[],
+    preserveIcao24?: string | null,
+  ) => void
   removeFlight: (icao24: string) => void
   clear: () => void
 }
 
-export const useFlightsStore = create<FlightsState & FlightsAction>()((set) => ({
-  map: new Map(),
-  addFlights: (flights) => set((state) => {
-    const newMap = new Map(state.map)
-    for (const flight of flights) {
-      newMap.set(flight.icao24, flight)
-    }
-    return { map: newMap }
+export const useFlightsStore = create<FlightsState & FlightsAction>()(
+  (set) => ({
+    map: new Map(),
+    addFlights: (aircraft) =>
+      set((state) => {
+        const newMap = new Map(state.map)
+        for (const ac of aircraft) {
+          newMap.set(ac.hex.toLowerCase(), ac)
+        }
+        return { map: newMap }
+      }),
+    setFlightsFromViewport: (aircraft, preserveIcao24) =>
+      set((state) => {
+        const newMap = new Map<string, AdsbAircraft>()
+        for (const ac of aircraft) {
+          newMap.set(ac.hex.toLowerCase(), ac)
+        }
+        if (preserveIcao24) {
+          const preserved = state.map.get(preserveIcao24)
+          if (preserved && !newMap.has(preserveIcao24)) {
+            newMap.set(preserveIcao24, preserved)
+          }
+        }
+        return { map: newMap }
+      }),
+    removeFlight: (icao24) =>
+      set((state) => {
+        const newMap = new Map(state.map)
+        newMap.delete(icao24)
+        return { map: newMap }
+      }),
+    clear: () => set({ map: new Map() }),
   }),
-  removeFlight: (icao24) => set((state) => {
-    const newMap = new Map(state.map)
-    newMap.delete(icao24)
-    return { map: newMap }
-  }),
-  clear: () => set({ map: new Map() }),
-}))
+)

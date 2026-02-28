@@ -53,5 +53,7 @@ export default defineSchema({
     home_link: v.optional(v.string()),
     wikipedia_link: v.optional(v.string()),
     keywords: v.optional(v.string()),
-  }).index('by_ident', ['ident']).index('by_icao_code', ['icao_code']),
+  })
+    .index('by_ident', ['ident'])
+    .index('by_icao_code', ['icao_code']),
 })
