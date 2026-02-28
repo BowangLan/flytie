@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { ReactNode } from 'react';
+import type { ReactNode } from 'react'
 import {
   Activity,
   ArrowDown,
@@ -75,8 +75,8 @@ function haversineKm(
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) *
-    Math.cos((lat2 * Math.PI) / 180) *
-    Math.sin(dLon / 2) ** 2
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
@@ -143,7 +143,11 @@ function getStatusBadgeVariant(status: string): string {
   return 'border-cyan-300/40 bg-cyan-300/15 text-cyan-100'
 }
 
-function HeaderSection({ aerodataFlight, selectedAircraft, onClose }: SectionProps & { onClose: () => void }) {
+function HeaderSection({
+  aerodataFlight,
+  selectedAircraft,
+  onClose,
+}: SectionProps & { onClose: () => void }) {
   const callsign =
     selectedAircraft?.flight?.trim() ?? aerodataFlight?.callSign?.trim() ?? ''
   const icao24 =
@@ -151,8 +155,7 @@ function HeaderSection({ aerodataFlight, selectedAircraft, onClose }: SectionPro
     aerodataFlight?.aircraft?.modeS?.toUpperCase() ??
     ''
   const statusLabel = getStatusLabel(aerodataFlight, selectedAircraft)
-  const hasStatus =
-    aerodataFlight?.status?.trim() || selectedAircraft != null
+  const hasStatus = aerodataFlight?.status?.trim() || selectedAircraft != null
 
   return (
     <>
@@ -163,11 +166,15 @@ function HeaderSection({ aerodataFlight, selectedAircraft, onClose }: SectionPro
           </SheetTitle>
           <div className="flex flex-col items-start gap-1">
             <div className="text-xs text-neutral-500">
-              ICAO24: <span className="font-mono text-foreground/80 font-semibold">{icao24}</span>
+              ICAO24:{' '}
+              <span className="font-mono text-foreground/80 font-semibold">
+                {icao24}
+              </span>
             </div>
             {aerodataFlight?.aircraft?.model?.trim() && (
               <div className="text-xs text-neutral-500">
-                Aircraft Type: <span className="text-foreground/80 font-semibold">
+                Aircraft Type:{' '}
+                <span className="text-foreground/80 font-semibold">
                   {aerodataFlight.aircraft.model.trim()}
                 </span>
               </div>
@@ -264,11 +271,11 @@ function RouteSection({ aerodataFlight, selectedAircraft }: SectionProps) {
   const remainingKm =
     selectedAircraft && totalKm > 0
       ? haversineKm(
-        selectedAircraft.lat,
-        selectedAircraft.lon,
-        arr.airport.location.lat,
-        arr.airport.location.lon,
-      )
+          selectedAircraft.lat,
+          selectedAircraft.lon,
+          arr.airport.location.lat,
+          arr.airport.location.lon,
+        )
       : null
   const pct =
     totalKm > 0 && remainingKm != null
@@ -280,27 +287,26 @@ function RouteSection({ aerodataFlight, selectedAircraft }: SectionProps) {
       {/* From To Section */}
       <div className="flex items-center gap-2 relative w-full">
         <div className="absolute inset-0 flex items-center justify-center z-0">
-          <Plane className="size-5 text-foreground rotate-45" fill="currentColor" />
+          <Plane
+            className="size-5 text-foreground rotate-45"
+            fill="currentColor"
+          />
         </div>
         <div className="z-1 flex items-center justify-between w-full">
           {/* Left - Departure */}
-          <div className='flex items-center gap-2 text-left text-base'>
+          <div className="flex items-center gap-2 text-left text-base">
             {/* Code */}
             <span className="font-bold text-white">
               {dep.airport.iata ?? dep.airport.icao}
             </span>
             {/* Time */}
-            <span className="tabular-nums text-white">
-              {depTimeStr}
-            </span>
+            <span className="tabular-nums text-white">{depTimeStr}</span>
           </div>
 
           {/* Right - Arrival ( code + time ) */}
-          <div className='flex items-center gap-2 text-right text-base'>
+          <div className="flex items-center gap-2 text-right text-base">
             {/* Time */}
-            <span className="tabular-nums text-white">
-              {arrTimeStr}
-            </span>
+            <span className="tabular-nums text-white">{arrTimeStr}</span>
             {/* Code */}
             <span className="font-bold text-white">
               {arr.airport.iata ?? arr.airport.icao}
@@ -607,7 +613,10 @@ export function SelectedFlightSheet() {
         onInteractOutside={(e) => e.preventDefault()}
       >
         <SheetHeader className="border-b border-neutral-800 bg-zinc-950 px-4 py-4">
-          <HeaderSection {...sectionProps} onClose={() => setSelectedIcao24(null)} />
+          <HeaderSection
+            {...sectionProps}
+            onClose={() => setSelectedIcao24(null)}
+          />
         </SheetHeader>
 
         {!selectedAircraft ? (

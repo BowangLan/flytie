@@ -3,10 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../../convex/_generated/api'
 import type { AdsbAircraft } from './flights'
 import { createWorldMapDataSource } from './data-source'
-import type {
-  WorldMapDataSnapshot,
-  WorldMapDataSource,
-} from './data-source'
+import type { WorldMapDataSnapshot, WorldMapDataSource } from './data-source'
 import { useFlightsStore } from '#/store/flights-store'
 import { useSelectedFlightStore } from '#/store/selected-flight.store'
 

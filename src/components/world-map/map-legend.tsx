@@ -102,9 +102,7 @@ export function MapLegend({
           style={{ borderColor: 'rgba(255,255,255,0.08)' }}
         >
           <div className="mb-1 flex items-center justify-between">
-            <span className="uppercase text-white/35">
-              Scale
-            </span>
+            <span className="uppercase text-white/35">Scale</span>
             <span className="tabular-nums text-white/75">{kmLabel}</span>
           </div>
 
@@ -137,9 +135,7 @@ export function MapLegend({
               />
             </div>
 
-            <span className="text-[9px] uppercase text-white/28">
-              Ground
-            </span>
+            <span className="text-[9px] uppercase text-white/28">Ground</span>
           </div>
         </div>
       </div>

@@ -10,7 +10,8 @@ export type WorldMapDataSource = {
 
 export function createWorldMapDataSource({
   loadAircraft,
-}: Partial<WorldMapDataSource> & Pick<WorldMapDataSource, 'loadAircraft'>): WorldMapDataSource {
+}: Partial<WorldMapDataSource> &
+  Pick<WorldMapDataSource, 'loadAircraft'>): WorldMapDataSource {
   return {
     loadAircraft,
   }
