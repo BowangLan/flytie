@@ -22,6 +22,9 @@ function createDefaultWorldMapDataSource(
   })
 }
 
+// TODO: Make this configurable
+const REFRESH_INTERVAL_MS = 10_000 // 10 seconds
+
 export function useWorldMapData(
   dataSource?: WorldMapDataSource,
 ): WorldMapDataSnapshot {
@@ -49,7 +52,7 @@ export function useWorldMapData(
     }
 
     loadAircraft()
-    const intervalId = setInterval(loadAircraft, 10_000)
+    const intervalId = setInterval(loadAircraft, REFRESH_INTERVAL_MS)
 
     return () => {
       cancelled = true

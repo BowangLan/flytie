@@ -39,6 +39,12 @@ import {
 } from './world-map-config'
 import type { CursorCoord } from './world-map-config'
 import { applyMapStyleOverrides } from './world-map-style'
+import {
+  AIRSPACE_BOUNDARIES_DATA_URL,
+  AIRSPACE_BOUNDARIES_SOURCE_ID,
+  AIRSPACE_BOUNDARY_GLOW_LAYER,
+  AIRSPACE_BOUNDARY_LINE_LAYER,
+} from './airspace'
 
 function isSameCameraState(a: CameraState, b: CameraState) {
   return (
@@ -183,6 +189,7 @@ export default function WorldMap({
       unselectedAircraft,
     })
   }, [
+    handleHover,
     hoveredIcao24,
     routeSegments,
     selectedAircraft,
@@ -257,6 +264,14 @@ export default function WorldMap({
               />
             </Source>
           ) : null}
+          <Source
+            id={AIRSPACE_BOUNDARIES_SOURCE_ID}
+            type="geojson"
+            data={AIRSPACE_BOUNDARIES_DATA_URL}
+          >
+            <Layer {...AIRSPACE_BOUNDARY_GLOW_LAYER} />
+            <Layer {...AIRSPACE_BOUNDARY_LINE_LAYER} />
+          </Source>
           <WorldMapDeckOverlay layers={layers} interleaved />
         </Map>
       </div>

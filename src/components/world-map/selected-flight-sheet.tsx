@@ -167,7 +167,7 @@ function HeaderSection({ aerodataFlight, selectedAircraft, onClose }: SectionPro
             </div>
             {aerodataFlight?.aircraft?.model?.trim() && (
               <div className="text-xs text-neutral-500">
-                Type: <span className="text-foreground/80 font-semibold">
+                Aircraft Type: <span className="text-foreground/80 font-semibold">
                   {aerodataFlight.aircraft.model.trim()}
                 </span>
               </div>
@@ -189,8 +189,8 @@ function HeaderSection({ aerodataFlight, selectedAircraft, onClose }: SectionPro
       </div>
 
       {(selectedAircraft?.r || selectedAircraft?.t) && (
-        <div className="relative mt-3 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-xs text-neutral-400">
-          <Plane className="size-3.5 text-neutral-500" />
+        <div className="relative mt-2 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-sm text-foreground/80">
+          <Plane className="size-4 text-foreground/80" />
           {[selectedAircraft.r, selectedAircraft.t].filter(Boolean).join(' · ')}
         </div>
       )}

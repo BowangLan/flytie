@@ -6,6 +6,8 @@ export const WORLD_MAP_COLORS = {
   countryFallback: COLORS.NEUTRAL_700,
   outline: COLORS.NEUTRAL_600,
   label: COLORS.NEUTRAL_500,
+  airspaceBoundary: '#f87171',
+  airspaceBoundaryGlow: '#ef4444',
   marker: COLORS.NEUTRAL_400,
   markerHover: COLORS.NEUTRAL_200,
   markerSelected: COLORS.PRIMARY,
