@@ -1,7 +1,10 @@
-import { MapboxOverlay, type MapboxOverlayProps } from '@deck.gl/mapbox'
+import { useQuery } from '@tanstack/react-query'
+import { MapboxOverlay } from '@deck.gl/mapbox'
 import { IconLayer, PathLayer } from '@deck.gl/layers'
 import type { PickingInfo } from '@deck.gl/core'
+import type { MapboxOverlayProps } from '@deck.gl/mapbox'
 import maplibregl from 'maplibre-gl'
+import type { Map as MapLibreMap } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   startTransition,
@@ -12,12 +15,15 @@ import {
   useState,
 } from 'react'
 import Map, {
+  Layer,
+  Source,
   useControl,
-  type MapRef,
-  type ViewState,
-  type ViewStateChangeEvent,
 } from 'react-map-gl/maplibre'
-import type { Map as MapLibreMap } from 'maplibre-gl'
+import type {
+  MapRef,
+  ViewState,
+  ViewStateChangeEvent,
+} from 'react-map-gl/maplibre'
 import type { AdsbAircraft } from './flights'
 import { COLORS } from '@/lib/colors'
 import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
@@ -25,7 +31,8 @@ import { FlightTooltip } from './flight-tooltip'
 import type { TooltipData } from './flight-tooltip'
 import { SelectedFlightSheet } from './selected-flight-sheet'
 import { useSelectedFlightStore } from '#/store/selected-flight.store'
-import { MapLegend, type CameraState } from './map-legend'
+import { MapLegend } from './map-legend'
+import type { CameraState } from './map-legend'
 import type { WorldMapDataSource } from './data-source'
 import { useWorldMapData } from './use-world-map-data'
 
@@ -38,7 +45,7 @@ const INITIAL_VIEW_STATE: ViewState = {
   padding: { top: 0, bottom: 0, left: 0, right: 0 },
 }
 const MIN_ZOOM = 1
-const MAX_ZOOM = 8
+const MAX_ZOOM = 20
 const MAP_STYLE =
   'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 const MAP_BACKGROUND = COLORS.NEUTRAL_800
@@ -53,6 +60,16 @@ const MARKER_SIZE_PX = 22
 const MARKER_MIN_SIZE_PX = 18
 const MARKER_MAX_SIZE_PX = 28
 const ANGLE_OFFSET = 70
+const WEATHER_SOURCE_ID = 'weather-radar'
+const WEATHER_LAYER_ID = 'weather-radar-layer'
+const WEATHER_FRAME_URL =
+  'https://api.rainviewer.com/public/weather-maps.json'
+const WEATHER_REFRESH_MS = 10 * 60 * 1000
+const WEATHER_TILE_SIZE = 256
+const WEATHER_TILE_COLOR_SCHEME = 2
+const WEATHER_TILE_OPTIONS = '1_1'
+const WEATHER_TILE_OPACITY = 0.38
+const WEATHER_MAX_ZOOM = 20
 
 const PLANE_SVG_PATH =
   'M21 16.2632V14.3684L13.4211 9.63158V4.42105C13.4211 3.63474 12.7863 3 12 3C11.2137 3 10.5789 3.63474 10.5789 4.42105V9.63158L3 14.3684V16.2632L10.5789 13.8947V19.1053L8.68421 20.5263V21.9474L12 21L15.3158 21.9474V20.5263L13.4211 19.1053V13.8947L21 16.2632Z'
@@ -82,6 +99,16 @@ type CursorCoord = { lon: number; lat: number } | null
 
 type RouteSegment = {
   path: [number, number][]
+}
+
+type WeatherMapsResponse = {
+  host?: string
+  radar?: {
+    past?: Array<{
+      path?: string
+      time?: number
+    }>
+  }
 }
 
 const FILL_OVERRIDES = [
@@ -271,7 +298,6 @@ function isSameCameraState(a: CameraState, b: CameraState) {
 function getCameraState(map: MapRef | null, zoom: number): CameraState | null {
   if (!map) return null
   const bounds = map.getBounds()
-  if (!bounds) return null
 
   return {
     lon: [bounds.getWest(), bounds.getEast()],
@@ -282,7 +308,7 @@ function getCameraState(map: MapRef | null, zoom: number): CameraState | null {
 
 function applyMapStyleOverrides(map: MapLibreMap) {
   const style = map.getStyle()
-  const layerIds = new Set(style.layers?.map((layer) => layer.id) ?? [])
+  const layerIds = new Set(style.layers.map((layer) => layer.id))
 
   for (const [layerId, prop, value] of FILL_OVERRIDES) {
     if (!layerIds.has(layerId)) continue
@@ -328,6 +354,23 @@ export default function WorldMap({
     setIsClient(true)
   }, [])
 
+  const { data: weatherTileUrl } = useQuery({
+    queryKey: ['weather-radar-overlay'],
+    enabled: isClient,
+    refetchInterval: WEATHER_REFRESH_MS,
+    queryFn: async () => {
+      const response = await fetch(WEATHER_FRAME_URL)
+      if (!response.ok) return null
+
+      const data = (await response.json()) as WeatherMapsResponse
+      const host = data.host
+      const latestFrame = data.radar?.past?.at(-1)?.path
+      if (!host || !latestFrame) return null
+
+      return `${host}${latestFrame}/${WEATHER_TILE_SIZE}/{z}/{x}/{y}/${WEATHER_TILE_COLOR_SCHEME}/${WEATHER_TILE_OPTIONS}.png`
+    },
+  })
+
   const syncCameraState = useCallback((zoom: number) => {
     const nextCameraState = getCameraState(mapRef.current, zoom)
     if (!nextCameraState) return
@@ -352,8 +395,8 @@ export default function WorldMap({
   }, [])
 
   const routeSegments = useMemo<RouteSegment[]>(() => {
-    const departure = aerodataFlight?.departure?.airport?.location
-    const arrival = aerodataFlight?.arrival?.airport?.location
+    const departure = aerodataFlight?.departure.airport.location
+    const arrival = aerodataFlight?.arrival.airport.location
     if (!departure || !arrival) return []
     return buildRouteSegments(
       departure.lon,
@@ -397,8 +440,8 @@ export default function WorldMap({
     if (aircraftObject && Number.isFinite(info.x) && Number.isFinite(info.y)) {
       setTooltip({
         aircraft: aircraftObject,
-        x: info.x as number,
-        y: info.y as number,
+        x: info.x,
+        y: info.y,
       })
       return
     }
@@ -584,6 +627,22 @@ export default function WorldMap({
           }}
           onMouseLeave={() => setCursorCoord(null)}
         >
+          {weatherTileUrl ? (
+            <Source
+              id={WEATHER_SOURCE_ID}
+              type="raster"
+              tiles={[weatherTileUrl]}
+              tileSize={WEATHER_TILE_SIZE}
+              attribution='<a href="https://www.rainviewer.com/" target="_blank" rel="noopener noreferrer">RainViewer</a>'
+            >
+              <Layer
+                id={WEATHER_LAYER_ID}
+                type="raster"
+                paint={{ 'raster-opacity': WEATHER_TILE_OPACITY }}
+                maxzoom={WEATHER_MAX_ZOOM}
+              />
+            </Source>
+          ) : null}
           <DeckGLOverlay layers={layers} interleaved />
         </Map>
       </div>
