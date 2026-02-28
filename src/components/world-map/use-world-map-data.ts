@@ -1,10 +1,13 @@
 import { useAction } from 'convex/react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../../convex/_generated/api'
 import type { AdsbAircraft } from './flights'
 import { createWorldMapDataSource } from './data-source'
 import type { WorldMapDataSnapshot, WorldMapDataSource } from './data-source'
 import { useFlightsStore } from '#/store/flights-store'
+import type { AircraftHistoryMap } from './replay-utils'
+import { buildReplayAircraft, appendAircraftSnapshot } from './replay-utils'
+import { useReplayTimelineStore } from '#/store/replay-timeline-store'
 import { useSelectedFlightStore } from '#/store/selected-flight.store'
 
 function createDefaultWorldMapDataSource(
@@ -27,7 +30,15 @@ export function useWorldMapData(
 ): WorldMapDataSnapshot {
   const fetchAircraftAll = useAction(api.lib.adbsexchange.fetchAircraftAll)
   const selectedIcao24 = useSelectedFlightStore((state) => state.selectedIcao24)
+  const scrubbedTimestamp = useReplayTimelineStore(
+    (state) => state.scrubbedTimestamp,
+  )
   const [aircraft, setAircraft] = useState<AdsbAircraft[]>([])
+  const historyRef = useRef<AircraftHistoryMap>(new Map())
+  const [historyVersion, setHistoryVersion] = useState(0)
+  const [lastSnapshotTimestamp, setLastSnapshotTimestamp] = useState<number | null>(
+    null,
+  )
 
   const resolvedDataSource = useMemo(
     () => dataSource ?? createDefaultWorldMapDataSource(fetchAircraftAll),
@@ -41,7 +52,11 @@ export function useWorldMapData(
       try {
         const nextAircraft = await resolvedDataSource.loadAircraft()
         if (!cancelled) {
+          const snapshotTimestamp = Date.now()
+          appendAircraftSnapshot(historyRef.current, nextAircraft, snapshotTimestamp)
           setAircraft(nextAircraft)
+          setLastSnapshotTimestamp(snapshotTimestamp)
+          setHistoryVersion((version) => version + 1)
         }
       } catch (error) {
         console.error('ADSBExchange fetch failed:', error)
@@ -57,9 +72,19 @@ export function useWorldMapData(
     }
   }, [resolvedDataSource])
 
-  useEffect(() => {
-    useFlightsStore.getState().setFlightsFromViewport(aircraft, selectedIcao24)
-  }, [aircraft, selectedIcao24])
+  const effectiveAircraft = useMemo(() => {
+    if (!scrubbedTimestamp) return aircraft
+    if (!lastSnapshotTimestamp || scrubbedTimestamp >= lastSnapshotTimestamp) {
+      return aircraft
+    }
+    return buildReplayAircraft(historyRef.current, scrubbedTimestamp)
+  }, [aircraft, historyVersion, lastSnapshotTimestamp, scrubbedTimestamp])
 
-  return { aircraft }
+  useEffect(() => {
+    useFlightsStore
+      .getState()
+      .setFlightsFromViewport(effectiveAircraft, selectedIcao24)
+  }, [effectiveAircraft, selectedIcao24])
+
+  return { aircraft: effectiveAircraft }
 }

@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react'
 import Map, { Layer, Source } from 'react-map-gl/maplibre'
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre'
@@ -25,6 +26,7 @@ import { createWorldMapLayers, buildRouteSegments } from './world-map-layers'
 import type { RouteSegment } from './world-map-layers'
 import { useWeatherRadar } from './use-weather-radar'
 import { WorldMapDeckOverlay } from './world-map-deck-overlay'
+import { ReplayTimeline } from './replay-timeline'
 import {
   INITIAL_VIEW_STATE,
   MAP_STYLE,
@@ -75,7 +77,11 @@ export default function WorldMap({
   'use no memo'
 
   const { aircraft } = useWorldMapData(dataSource)
-  const [isClient, setIsClient] = useState(false)
+  const isClient = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  )
   const [tooltip, setTooltip] = useState<TooltipData | null>(null)
   const [cursorCoord, setCursorCoord] = useState<CursorCoord>(null)
   const [hoveredIcao24, setHoveredIcao24] = useState<string | null>(null)
@@ -93,10 +99,6 @@ export default function WorldMap({
   )
   const selectedIcao24 = useSelectedFlightStore((state) => state.selectedIcao24)
   const aerodataFlight = useSelectedFlightStore((state) => state.aerodataFlight)
-
-  useEffect(() => {
-    setIsClient(true)
-  }, [])
 
   const { data: weatherTileUrl } = useWeatherRadar(isClient, WEATHER_TILE_SIZE)
 
@@ -298,6 +300,7 @@ export default function WorldMap({
         />
       )}
       <MapLegend {...cameraState} cursor={cursorCoord} />
+      {/* <ReplayTimeline /> */}
       <SelectedFlightSheet />
     </>
   )

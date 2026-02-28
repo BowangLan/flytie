@@ -1,6 +1,7 @@
 import { IconLayer, PathLayer } from '@deck.gl/layers'
 import type { PickingInfo } from '@deck.gl/core'
 import type { AdsbAircraft } from './flights'
+import { getAircraftSizeScale } from './aircraft-size'
 import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
 
 const MARKER_SIZE_PX = 22
@@ -177,9 +178,11 @@ function getMarkerSize(
   hoveredIcao24: string | null,
 ) {
   const icao24 = aircraft.hex.toLowerCase()
-  if (icao24 === selectedIcao24) return MARKER_SIZE_PX + 5
-  if (icao24 === hoveredIcao24) return MARKER_SIZE_PX + 3
-  return MARKER_SIZE_PX
+  const baseSize = MARKER_SIZE_PX * getAircraftSizeScale(aircraft.category)
+
+  if (icao24 === selectedIcao24) return baseSize + 5
+  if (icao24 === hoveredIcao24) return baseSize + 3
+  return baseSize
 }
 
 function greatCirclePoint(

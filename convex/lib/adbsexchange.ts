@@ -163,3 +163,14 @@ export const fetchAircraftAll = action({
     return data
   },
 })
+
+export const fetchFlightStates = action({
+  args: {
+    icao24: v.string(),
+  },
+  handler: async (ctx, { icao24 }) => {
+    // mock the data AdsbAircraft
+    const data: AdsbAircraft[] = []
+    return data
+  },
+})
