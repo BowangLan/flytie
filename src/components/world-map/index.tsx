@@ -47,6 +47,7 @@ import {
   AIRSPACE_BOUNDARY_GLOW_LAYER,
   AIRSPACE_BOUNDARY_LINE_LAYER,
 } from './airspace'
+import { FlightSearchDialog } from './flight-search-dialog'
 
 function isSameCameraState(a: CameraState, b: CameraState) {
   return (
@@ -215,6 +216,16 @@ export default function WorldMap({
     }
   }, [])
 
+  useEffect(() => {
+    if (!selectedAircraft || !mapRef.current) return
+
+    mapRef.current.easeTo({
+      center: [selectedAircraft.lon, selectedAircraft.lat],
+      duration: 700,
+      essential: true,
+    })
+  }, [selectedAircraft])
+
   if (!isClient) {
     return (
       <>
@@ -300,6 +311,12 @@ export default function WorldMap({
         />
       )}
       <MapLegend {...cameraState} cursor={cursorCoord} />
+      <div className="pointer-events-none fixed top-5 left-5 z-20">
+        <FlightSearchDialog
+          aircraft={aircraft}
+          onSelectIcao24={setSelectedIcao24}
+        />
+      </div>
       {/* <ReplayTimeline /> */}
       <SelectedFlightSheet />
     </>

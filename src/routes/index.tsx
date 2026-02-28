@@ -13,7 +13,7 @@ function HomePage() {
       </Suspense>
       <div className="pointer-events-none fixed bottom-5 right-5 z-10 text-right">
         <p className="text-[11px] text-white/25 tracking-wide">
-          Scroll to zoom · Drag to pan
+          Scroll to zoom · Drag to pan · Ctrl/Cmd K to search
         </p>
       </div>
     </>
