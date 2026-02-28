@@ -1,32 +1,18 @@
-import { useQuery } from '@tanstack/react-query'
-import { MapboxOverlay } from '@deck.gl/mapbox'
-import { IconLayer, PathLayer } from '@deck.gl/layers'
 import type { PickingInfo } from '@deck.gl/core'
-import type { MapboxOverlayProps } from '@deck.gl/mapbox'
 import maplibregl from 'maplibre-gl'
-import type { Map as MapLibreMap } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   startTransition,
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
 } from 'react'
-import Map, {
-  Layer,
-  Source,
-  useControl,
-} from 'react-map-gl/maplibre'
-import type {
-  MapRef,
-  ViewState,
-  ViewStateChangeEvent,
-} from 'react-map-gl/maplibre'
+import Map, { Layer, Source } from 'react-map-gl/maplibre'
+import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre'
 import type { AdsbAircraft } from './flights'
-import { COLORS } from '@/lib/colors'
-import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
 import { FlightTooltip } from './flight-tooltip'
 import type { TooltipData } from './flight-tooltip'
 import { SelectedFlightSheet } from './selected-flight-sheet'
@@ -35,255 +21,24 @@ import { MapLegend } from './map-legend'
 import type { CameraState } from './map-legend'
 import type { WorldMapDataSource } from './data-source'
 import { useWorldMapData } from './use-world-map-data'
-
-const INITIAL_VIEW_STATE: ViewState = {
-  longitude: 0,
-  latitude: 20,
-  zoom: 4,
-  bearing: 0,
-  pitch: 0,
-  padding: { top: 0, bottom: 0, left: 0, right: 0 },
-}
-const MIN_ZOOM = 1
-const MAX_ZOOM = 20
-const MAP_STYLE =
-  'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
-const MAP_BACKGROUND = COLORS.NEUTRAL_800
-const MAP_OCEAN = COLORS.NEUTRAL_600
-const MAP_OCEAN_LINE = COLORS.NEUTRAL_700
-const MAP_LAND = COLORS.NEUTRAL_800
-const MAP_BOUNDARY = COLORS.NEUTRAL_700
-const MAP_COUNTRY_LABEL = COLORS.NEUTRAL_500
-const MAP_PLACE_LABEL = COLORS.NEUTRAL_500
-const MAP_WATER_LABEL = COLORS.NEUTRAL_600
-const MARKER_SIZE_PX = 22
-const MARKER_MIN_SIZE_PX = 18
-const MARKER_MAX_SIZE_PX = 28
-const ANGLE_OFFSET = 70
-const WEATHER_SOURCE_ID = 'weather-radar'
-const WEATHER_LAYER_ID = 'weather-radar-layer'
-const WEATHER_FRAME_URL =
-  'https://api.rainviewer.com/public/weather-maps.json'
-const WEATHER_REFRESH_MS = 10 * 60 * 1000
-const WEATHER_TILE_SIZE = 256
-const WEATHER_TILE_COLOR_SCHEME = 2
-const WEATHER_TILE_OPTIONS = '1_1'
-const WEATHER_TILE_OPACITY = 0.38
-const WEATHER_MAX_ZOOM = 20
-
-const PLANE_SVG_PATH =
-  'M21 16.2632V14.3684L13.4211 9.63158V4.42105C13.4211 3.63474 12.7863 3 12 3C11.2137 3 10.5789 3.63474 10.5789 4.42105V9.63158L3 14.3684V16.2632L10.5789 13.8947V19.1053L8.68421 20.5263V21.9474L12 21L15.3158 21.9474V20.5263L13.4211 19.1053V13.8947L21 16.2632Z'
-
-const PLANE_ATLAS_SIZE = 128
-const PLANE_ICON_MAPPING = {
-  plane: {
-    x: 0,
-    y: 0,
-    width: PLANE_ATLAS_SIZE,
-    height: PLANE_ATLAS_SIZE,
-    anchorX: PLANE_ATLAS_SIZE / 2,
-    anchorY: PLANE_ATLAS_SIZE / 2,
-    mask: true,
-  },
-}
-
-const PLANE_ICON_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${PLANE_ATLAS_SIZE}" height="${PLANE_ATLAS_SIZE}" viewBox="0 0 24 24" fill="black"><path d="${PLANE_SVG_PATH}"/></svg>`,
-)}`
-
-const PLANE_BORDER_ICON_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${PLANE_ATLAS_SIZE}" height="${PLANE_ATLAS_SIZE}" viewBox="0 0 24 24"><path d="${PLANE_SVG_PATH}" fill="black" stroke="black" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/></svg>`,
-)}`
-
-type CursorCoord = { lon: number; lat: number } | null
-
-type RouteSegment = {
-  path: [number, number][]
-}
-
-type WeatherMapsResponse = {
-  host?: string
-  radar?: {
-    past?: Array<{
-      path?: string
-      time?: number
-    }>
-  }
-}
-
-const FILL_OVERRIDES = [
-  ['background', 'background-color', MAP_BACKGROUND],
-  ['landcover', 'fill-color', MAP_LAND],
-  ['landuse', 'fill-color', MAP_LAND],
-  ['landuse_residential', 'fill-color', 'rgba(38, 38, 38, 0.45)'],
-  ['water', 'fill-color', MAP_OCEAN],
-  ['water_shadow', 'fill-color', 'rgba(10, 10, 10, 0.9)'],
-  ['waterway', 'line-color', MAP_OCEAN_LINE],
-  ['boundary_country_outline', 'line-color', 'rgba(10, 10, 10, 0.96)'],
-  ['boundary_country_inner', 'line-color', MAP_BOUNDARY],
-] as const
-
-const LABEL_OVERRIDES = [
-  ['place_country_1', MAP_COUNTRY_LABEL, 'rgba(10, 10, 10, 0.96)', 1.2],
-  ['place_country_2', MAP_COUNTRY_LABEL, 'rgba(10, 10, 10, 0.96)', 1.2],
-  ['place_state', COLORS.NEUTRAL_600, 'rgba(10, 10, 10, 0.96)', 1],
-  ['place_continent', COLORS.NEUTRAL_700, 'rgba(10, 10, 10, 0.96)', 1],
-  ['place_city_r6', MAP_PLACE_LABEL, 'rgba(10, 10, 10, 0.96)', 1],
-  ['place_city_r5', MAP_PLACE_LABEL, 'rgba(10, 10, 10, 0.96)', 1],
-  ['place_town', COLORS.NEUTRAL_500, 'rgba(10, 10, 10, 0.94)', 1],
-  ['place_villages', COLORS.NEUTRAL_600, 'rgba(10, 10, 10, 0.94)', 1],
-  ['place_suburbs', COLORS.NEUTRAL_600, 'rgba(10, 10, 10, 0.94)', 1],
-  ['place_hamlet', COLORS.NEUTRAL_700, 'rgba(10, 10, 10, 0.94)', 1],
-  ['watername_ocean', MAP_WATER_LABEL, 'rgba(10, 10, 10, 0.96)', 1.1],
-  ['watername_sea', MAP_WATER_LABEL, 'rgba(10, 10, 10, 0.96)', 1.1],
-  ['watername_lake', COLORS.NEUTRAL_600, 'rgba(10, 10, 10, 0.96)', 1],
-  ['watername_lake_line', COLORS.NEUTRAL_600, 'rgba(10, 10, 10, 0.96)', 1],
-  ['waterway_label', COLORS.NEUTRAL_600, 'rgba(10, 10, 10, 0.96)', 1],
-] as const
-
-function DeckGLOverlay(props: MapboxOverlayProps) {
-  const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay(props))
-  overlay.setProps(props)
-  return null
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value))
-}
-
-function colorToRgba(
-  color: string,
-  alpha = 255,
-): [number, number, number, number] {
-  const hex = color.replace('#', '')
-  const normalized =
-    hex.length === 3
-      ? hex
-          .split('')
-          .map((char) => `${char}${char}`)
-          .join('')
-      : hex
-
-  const int = Number.parseInt(normalized, 16)
-  return [(int >> 16) & 255, (int >> 8) & 255, int & 255, alpha]
-}
-
-function getMarkerColor(
-  aircraft: AdsbAircraft,
-  selectedIcao24: string | null,
-  hoveredIcao24: string | null,
-) {
-  const icao24 = aircraft.hex.toLowerCase()
-  if (icao24 === selectedIcao24) {
-    return colorToRgba(WORLD_MAP_COLORS.markerSelected, 255)
-  }
-  if (icao24 === hoveredIcao24) {
-    return colorToRgba(WORLD_MAP_COLORS.markerHover, 255)
-  }
-  return colorToRgba(WORLD_MAP_COLORS.marker, 255)
-}
-
-function getMarkerBorderColor(
-  aircraft: AdsbAircraft,
-  selectedIcao24: string | null,
-  hoveredIcao24: string | null,
-) {
-  const icao24 = aircraft.hex.toLowerCase()
-  if (icao24 === selectedIcao24) {
-    return colorToRgba(WORLD_MAP_COLORS.route, 255)
-  }
-  if (icao24 === hoveredIcao24) {
-    return colorToRgba(WORLD_MAP_COLORS.label, 255)
-  }
-  return colorToRgba('#0a0a0a', 255)
-}
-
-function getMarkerSize(
-  aircraft: AdsbAircraft,
-  selectedIcao24: string | null,
-  hoveredIcao24: string | null,
-) {
-  const icao24 = aircraft.hex.toLowerCase()
-  if (icao24 === selectedIcao24) return MARKER_SIZE_PX + 5
-  if (icao24 === hoveredIcao24) return MARKER_SIZE_PX + 3
-  return MARKER_SIZE_PX
-}
-
-function greatCirclePoint(
-  lon1: number,
-  lat1: number,
-  lon2: number,
-  lat2: number,
-  t: number,
-): [number, number] {
-  const toRad = Math.PI / 180
-  const phi1 = (90 - lat1) * toRad
-  const theta1 = lon1 * toRad
-  const phi2 = (90 - lat2) * toRad
-  const theta2 = lon2 * toRad
-
-  const x1 = Math.sin(phi1) * Math.cos(theta1)
-  const y1 = Math.sin(phi1) * Math.sin(theta1)
-  const z1 = Math.cos(phi1)
-
-  const x2 = Math.sin(phi2) * Math.cos(theta2)
-  const y2 = Math.sin(phi2) * Math.sin(theta2)
-  const z2 = Math.cos(phi2)
-
-  const dot = clamp(x1 * x2 + y1 * y2 + z1 * z2, -1, 1)
-
-  let wx: number
-  let wy: number
-  let wz: number
-
-  if (dot > 0.9995) {
-    wx = x1 + t * (x2 - x1)
-    wy = y1 + t * (y2 - y1)
-    wz = z1 + t * (z2 - z1)
-  } else {
-    const omega = Math.acos(dot)
-    const sinOmega = Math.sin(omega)
-    const a = Math.sin((1 - t) * omega) / sinOmega
-    const b = Math.sin(t * omega) / sinOmega
-    wx = a * x1 + b * x2
-    wy = a * y1 + b * y2
-    wz = a * z1 + b * z2
-  }
-
-  const len = Math.sqrt(wx * wx + wy * wy + wz * wz)
-  const nx = wx / len
-  const ny = wy / len
-  const nz = wz / len
-
-  return [
-    (Math.atan2(ny, nx) * 180) / Math.PI,
-    90 - (Math.acos(nz) * 180) / Math.PI,
-  ]
-}
-
-function buildRouteSegments(
-  lon1: number,
-  lat1: number,
-  lon2: number,
-  lat2: number,
-): RouteSegment[] {
-  const points: [number, number][] = []
-
-  for (let i = 0; i <= 64; i++) {
-    points.push(greatCirclePoint(lon1, lat1, lon2, lat2, i / 64))
-  }
-
-  const segments: RouteSegment[] = []
-
-  for (let i = 0; i < points.length - 1; i++) {
-    const start = points[i]
-    const end = points[i + 1]
-    if (Math.abs(end[0] - start[0]) > 180) continue
-    segments.push({ path: [start, end] })
-  }
-
-  return segments
-}
+import { createWorldMapLayers, buildRouteSegments } from './world-map-layers'
+import type { RouteSegment } from './world-map-layers'
+import { useWeatherRadar } from './use-weather-radar'
+import { WorldMapDeckOverlay } from './world-map-deck-overlay'
+import {
+  INITIAL_VIEW_STATE,
+  MAP_STYLE,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  WEATHER_LAYER_ID,
+  WEATHER_MAX_ZOOM,
+  WEATHER_SOURCE_ID,
+  WEATHER_TILE_OPACITY,
+  WEATHER_TILE_SIZE,
+  WORLD_MAP_BACKGROUND_STYLE,
+} from './world-map-config'
+import type { CursorCoord } from './world-map-config'
+import { applyMapStyleOverrides } from './world-map-style'
 
 function isSameCameraState(a: CameraState, b: CameraState) {
   return (
@@ -303,23 +58,6 @@ function getCameraState(map: MapRef | null, zoom: number): CameraState | null {
     lon: [bounds.getWest(), bounds.getEast()],
     lat: [bounds.getSouth(), bounds.getNorth()],
     zoom: 2 ** zoom,
-  }
-}
-
-function applyMapStyleOverrides(map: MapLibreMap) {
-  const style = map.getStyle()
-  const layerIds = new Set(style.layers.map((layer) => layer.id))
-
-  for (const [layerId, prop, value] of FILL_OVERRIDES) {
-    if (!layerIds.has(layerId)) continue
-    map.setPaintProperty(layerId, prop, value)
-  }
-
-  for (const [layerId, textColor, haloColor, haloWidth] of LABEL_OVERRIDES) {
-    if (!layerIds.has(layerId)) continue
-    map.setPaintProperty(layerId, 'text-color', textColor)
-    map.setPaintProperty(layerId, 'text-halo-color', haloColor)
-    map.setPaintProperty(layerId, 'text-halo-width', haloWidth)
   }
 }
 
@@ -354,22 +92,7 @@ export default function WorldMap({
     setIsClient(true)
   }, [])
 
-  const { data: weatherTileUrl } = useQuery({
-    queryKey: ['weather-radar-overlay'],
-    enabled: isClient,
-    refetchInterval: WEATHER_REFRESH_MS,
-    queryFn: async () => {
-      const response = await fetch(WEATHER_FRAME_URL)
-      if (!response.ok) return null
-
-      const data = (await response.json()) as WeatherMapsResponse
-      const host = data.host
-      const latestFrame = data.radar?.past?.at(-1)?.path
-      if (!host || !latestFrame) return null
-
-      return `${host}${latestFrame}/${WEATHER_TILE_SIZE}/{z}/{x}/{y}/${WEATHER_TILE_COLOR_SCHEME}/${WEATHER_TILE_OPTIONS}.png`
-    },
-  })
+  const { data: weatherTileUrl } = useWeatherRadar(isClient, WEATHER_TILE_SIZE)
 
   const syncCameraState = useCallback((zoom: number) => {
     const nextCameraState = getCameraState(mapRef.current, zoom)
@@ -409,8 +132,8 @@ export default function WorldMap({
   const selectedAircraft = useMemo(
     () =>
       selectedIcao24
-        ? aircraft.find((item) => item.hex.toLowerCase() === selectedIcao24) ??
-          null
+        ? (aircraft.find((item) => item.hex.toLowerCase() === selectedIcao24) ??
+          null)
         : null,
     [aircraft, selectedIcao24],
   )
@@ -423,7 +146,7 @@ export default function WorldMap({
     [aircraft, selectedIcao24],
   )
 
-  const handleHover = useCallback((info: PickingInfo<AdsbAircraft>) => {
+  const handleHover = useEffectEvent((info: PickingInfo<AdsbAircraft>) => {
     const aircraftObject = info.object ?? null
     const nextHoveredIcao24 = aircraftObject?.hex.toLowerCase() ?? null
 
@@ -447,122 +170,19 @@ export default function WorldMap({
     }
 
     hideTimerRef.current = setTimeout(() => setTooltip(null), 120)
-  }, [])
+  })
 
   const layers = useMemo(() => {
-    return [
-      new PathLayer<RouteSegment>({
-        id: 'selected-flight-route',
-        data: routeSegments,
-        pickable: false,
-        widthUnits: 'pixels',
-        widthMinPixels: 2,
-        getWidth: 2,
-        getColor: colorToRgba(WORLD_MAP_COLORS.route, 255),
-        getPath: (segment) => segment.path,
-      }),
-      new IconLayer<AdsbAircraft>({
-        id: 'flight-marker-borders',
-        data: unselectedAircraft,
-        pickable: false,
-        iconAtlas: PLANE_BORDER_ICON_ATLAS,
-        iconMapping: PLANE_ICON_MAPPING,
-        getIcon: () => 'plane',
-        getPosition: (item) => [item.lon, item.lat],
-        getAngle: (item) => item.track - ANGLE_OFFSET,
-        getColor: (item) =>
-          getMarkerBorderColor(item, selectedIcao24, hoveredIcao24),
-        getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
-        sizeUnits: 'pixels',
-        sizeMinPixels: MARKER_MIN_SIZE_PX,
-        sizeMaxPixels: MARKER_MAX_SIZE_PX,
-        alphaCutoff: 0.05,
-        updateTriggers: {
-          getColor: [selectedIcao24, hoveredIcao24],
-          getSize: [selectedIcao24, hoveredIcao24],
-        },
-      }),
-      new IconLayer<AdsbAircraft>({
-        id: 'flight-markers',
-        data: unselectedAircraft,
-        pickable: true,
-        autoHighlight: false,
-        iconAtlas: PLANE_ICON_ATLAS,
-        iconMapping: PLANE_ICON_MAPPING,
-        getIcon: () => 'plane',
-        getPosition: (item) => [item.lon, item.lat],
-        getAngle: (item) => item.track - ANGLE_OFFSET,
-        getColor: (item) => getMarkerColor(item, selectedIcao24, hoveredIcao24),
-        getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
-        sizeUnits: 'pixels',
-        sizeMinPixels: MARKER_MIN_SIZE_PX,
-        sizeMaxPixels: MARKER_MAX_SIZE_PX,
-        alphaCutoff: 0.05,
-        updateTriggers: {
-          getColor: [selectedIcao24, hoveredIcao24],
-          getSize: [selectedIcao24, hoveredIcao24],
-        },
-        onHover: handleHover,
-        onClick: (info) => {
-          const aircraftObject = info.object
-          if (!aircraftObject) {
-            setSelectedIcao24(null)
-            return
-          }
-          setSelectedIcao24(aircraftObject.hex.toLowerCase())
-        },
-      }),
-      new IconLayer<AdsbAircraft>({
-        id: 'selected-flight-marker-border',
-        data: selectedAircraft ? [selectedAircraft] : [],
-        pickable: false,
-        iconAtlas: PLANE_BORDER_ICON_ATLAS,
-        iconMapping: PLANE_ICON_MAPPING,
-        getIcon: () => 'plane',
-        getPosition: (item) => [item.lon, item.lat],
-        getAngle: (item) => item.track - ANGLE_OFFSET,
-        getColor: (item) =>
-          getMarkerBorderColor(item, selectedIcao24, hoveredIcao24),
-        getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
-        sizeUnits: 'pixels',
-        sizeMinPixels: MARKER_MIN_SIZE_PX,
-        sizeMaxPixels: MARKER_MAX_SIZE_PX,
-        alphaCutoff: 0.05,
-        updateTriggers: {
-          getColor: [selectedIcao24, hoveredIcao24],
-          getSize: [selectedIcao24, hoveredIcao24],
-        },
-      }),
-      new IconLayer<AdsbAircraft>({
-        id: 'selected-flight-marker',
-        data: selectedAircraft ? [selectedAircraft] : [],
-        pickable: true,
-        autoHighlight: false,
-        iconAtlas: PLANE_ICON_ATLAS,
-        iconMapping: PLANE_ICON_MAPPING,
-        getIcon: () => 'plane',
-        getPosition: (item) => [item.lon, item.lat],
-        getAngle: (item) => item.track - ANGLE_OFFSET,
-        getColor: (item) => getMarkerColor(item, selectedIcao24, hoveredIcao24),
-        getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
-        sizeUnits: 'pixels',
-        sizeMinPixels: MARKER_MIN_SIZE_PX,
-        sizeMaxPixels: MARKER_MAX_SIZE_PX,
-        alphaCutoff: 0.05,
-        updateTriggers: {
-          getColor: [selectedIcao24, hoveredIcao24],
-          getSize: [selectedIcao24, hoveredIcao24],
-        },
-        onHover: handleHover,
-        onClick: (info) => {
-          const aircraftObject = info.object
-          if (!aircraftObject) return
-          setSelectedIcao24(aircraftObject.hex.toLowerCase())
-        },
-      }),
-    ]
+    return createWorldMapLayers({
+      hoveredIcao24,
+      onHover: handleHover,
+      onSelect: setSelectedIcao24,
+      routeSegments,
+      selectedAircraft,
+      selectedIcao24,
+      unselectedAircraft,
+    })
   }, [
-    handleHover,
     hoveredIcao24,
     routeSegments,
     selectedAircraft,
@@ -581,10 +201,7 @@ export default function WorldMap({
   if (!isClient) {
     return (
       <>
-        <div
-          className="fixed inset-0 z-0"
-          style={{ background: WORLD_MAP_COLORS.background }}
-        />
+        <div className="fixed inset-0 z-0" style={WORLD_MAP_BACKGROUND_STYLE} />
         <SelectedFlightSheet />
       </>
     )
@@ -592,10 +209,7 @@ export default function WorldMap({
 
   return (
     <>
-      <div
-        className="fixed inset-0 z-0"
-        style={{ background: WORLD_MAP_COLORS.background }}
-      >
+      <div className="fixed inset-0 z-0" style={WORLD_MAP_BACKGROUND_STYLE}>
         <Map
           ref={mapRef}
           reuseMaps
@@ -643,7 +257,7 @@ export default function WorldMap({
               />
             </Source>
           ) : null}
-          <DeckGLOverlay layers={layers} interleaved />
+          <WorldMapDeckOverlay layers={layers} interleaved />
         </Map>
       </div>
       {tooltip && (
