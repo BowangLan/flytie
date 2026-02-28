@@ -123,18 +123,6 @@ export default function WorldMap({
     applyMapStyleOverrides(map)
   }, [])
 
-  const routeSegments = useMemo<RouteSegment[]>(() => {
-    const departure = aerodataFlight?.departure.airport.location
-    const arrival = aerodataFlight?.arrival.airport.location
-    if (!departure || !arrival) return []
-    return buildRouteSegments(
-      departure.lon,
-      departure.lat,
-      arrival.lon,
-      arrival.lat,
-    )
-  }, [aerodataFlight])
-
   const selectedAircraft = useMemo(
     () =>
       selectedIcao24
@@ -143,6 +131,26 @@ export default function WorldMap({
         : null,
     [aircraft, selectedIcao24],
   )
+
+  const routeSegments = useMemo<RouteSegment[]>(() => {
+    const departure = aerodataFlight?.departure.airport.location
+    const arrival = aerodataFlight?.arrival.airport.location
+    const currentPosition = selectedAircraft
+      ? { lon: selectedAircraft.lon, lat: selectedAircraft.lat }
+      : undefined
+    const track = selectedAircraft?.track
+
+    if (!departure && !arrival) return []
+    if (!departure && !currentPosition) return []
+    if (!arrival && !currentPosition) return []
+
+    return buildRouteSegments({
+      departureLocation: departure,
+      arrivalLocation: arrival,
+      currentPosition,
+      track,
+    })
+  }, [aerodataFlight, selectedAircraft])
 
   const unselectedAircraft = useMemo(
     () =>

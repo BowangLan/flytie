@@ -6,22 +6,29 @@ import {
   ArrowRight,
   ArrowUp,
   Building2,
+  ClipboardList,
   Clock,
   Compass,
+  DoorOpen,
   Gauge,
   Loader2,
   Plane,
   PlaneLanding,
   PlaneTakeoff,
+  Route,
   TowerControl,
   X,
 } from 'lucide-react'
-import { useAction } from 'convex/react'
-import { api } from '../../../convex/_generated/api'
+import {
+  computeDelayMinutes,
+  formatTimeForDisplay,
+  parseUtc,
+} from '#/lib/flight-time'
 import type { AerodataboxFlight } from '../../../convex/lib/aerodatabox'
 import type { AdsbAircraft } from '#/components/world-map/flights'
 import { useFlightsStore } from '#/store/flights-store'
 import { useSelectedFlightStore } from '#/store/selected-flight.store'
+import { useSelectedFlightData } from './use-selected-flight-data'
 import {
   Sheet,
   SheetContent,
@@ -40,19 +47,6 @@ function fmtRelativeTime(secondsAgo: number) {
   if (secondsAgo < 60) return `${Math.round(secondsAgo)}s ago`
   if (secondsAgo < 3600) return `${Math.floor(secondsAgo / 60)}m ago`
   return `${Math.floor(secondsAgo / 3600)}h ago`
-}
-
-/** Extract HH:MM from "YYYY-MM-DD HH:MM" or ISO string */
-function extractTime(s: string): string {
-  const m = s.match(/(\d{2}):(\d{2})/)
-  return m ? `${m[1]}:${m[2]}` : s
-}
-
-/** Parse UTC string to Date, or null */
-function parseUtc(s: string): Date | null {
-  if (!s) return null
-  const d = new Date(s)
-  return isNaN(d.getTime()) ? null : d
 }
 
 /** Format minutes as "Xh Ym" */
@@ -75,8 +69,8 @@ function haversineKm(
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
@@ -148,8 +142,14 @@ function HeaderSection({
   selectedAircraft,
   onClose,
 }: SectionProps & { onClose: () => void }) {
-  const callsign =
-    selectedAircraft?.flight?.trim() ?? aerodataFlight?.callSign?.trim() ?? ''
+  if (!selectedAircraft || !aerodataFlight) {
+    return (
+      <div className="text-sm text-neutral-400">
+        No flight data available.
+      </div>
+    )
+  }
+
   const icao24 =
     selectedAircraft?.hex.toUpperCase() ??
     aerodataFlight?.aircraft?.modeS?.toUpperCase() ??
@@ -162,7 +162,8 @@ function HeaderSection({
       <div className="relative flex items-start justify-between gap-3">
         <div className="flex-1 flex flex-col gap-2">
           <SheetTitle className="font-mono text-xl font-semibold text-white">
-            {callsign || icao24 || 'Selected Flight'}
+            {/* Flight number */}
+            {aerodataFlight.number.replace(' ', '')}
           </SheetTitle>
           <div className="flex flex-col items-start gap-1">
             <div className="text-xs text-neutral-500">
@@ -205,33 +206,62 @@ function HeaderSection({
   )
 }
 
-function GateBadge({
+/** Format terminal for display: "2B" → "Terminal 2B", "Terminal 1" stays as is */
+function formatTerminal(terminal: string | null | undefined): string | null {
+  if (!terminal?.trim()) return null
+  const t = terminal.trim()
+  return t.toLowerCase().startsWith('terminal') ? t : `Terminal ${t}`
+}
+
+function AirportDetailsRow({
   gate,
   terminal,
+  checkInDesk,
+  runway,
   variant,
 }: {
-  gate?: string
-  terminal?: string
+  gate?: string | null
+  terminal?: string | null
+  checkInDesk?: string | null
+  runway?: string | null
   variant: 'departure' | 'arrival'
 }) {
-  const displayGate = gate ?? '—'
-  const displayTerminal = terminal
-    ? terminal.toLowerCase().startsWith('terminal')
-      ? terminal
-      : `Terminal ${terminal}`
-    : null
-  const Icon = variant === 'departure' ? PlaneTakeoff : PlaneLanding
+  const items: { icon: ReactNode; label: string; value: string }[] = []
+  if (gate?.trim()) items.push({ icon: <DoorOpen className="size-3.5" />, label: 'Gate', value: gate.trim() })
+  const displayTerminal = formatTerminal(terminal)
+  if (displayTerminal) items.push({ icon: <Building2 className="size-3.5" />, label: 'Terminal', value: displayTerminal })
+  if (checkInDesk?.trim()) items.push({ icon: <ClipboardList className="size-3.5" />, label: 'Check-in', value: checkInDesk.trim() })
+  if (runway?.trim()) items.push({ icon: <Route className="size-3.5" />, label: 'Runway', value: runway.trim() })
 
+  if (items.length === 0) return null
+
+  const Icon = variant === 'departure' ? PlaneTakeoff : PlaneLanding
   return (
-    <div className="flex flex-col items-end gap-1.5">
-      <div className="flex items-center gap-1.5 rounded-2xl bg-[#FFD60A] px-3 py-2">
-        <Icon className="size-4 text-black" strokeWidth={2.5} />
-        <span className="font-bold text-black">{displayGate}</span>
+    <div className="flex items-start gap-2 text-sm pl-6">
+      {/* <Icon className="mt-0.5 size-4 shrink-0 text-neutral-500" /> */}
+      <div className="flex flex-wrap gap-x-3 gap-y-1">
+        {items.map(({ icon, label, value }) => (
+          <span key={label} className="flex items-center gap-1.5 text-neutral-400">
+            {/* <span className="text-neutral-500">{icon}</span> */}
+            <span className="text-neutral-500">{label}:</span>
+            <span className="font-medium text-neutral-200">{value}</span>
+          </span>
+        ))}
       </div>
-      {displayTerminal && (
-        <span className="text-xs text-neutral-400">{displayTerminal}</span>
-      )}
     </div>
+  )
+}
+
+function DelayBadge({ minutes }: { minutes: number }) {
+  const isDelayed = minutes > 0
+  const label = isDelayed ? `+${minutes}m` : `${minutes}m`
+  return (
+    <span
+      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${isDelayed ? 'bg-amber-500/20 text-amber-200' : 'bg-emerald-500/20 text-emerald-200'
+        }`}
+    >
+      {label}
+    </span>
   )
 }
 
@@ -251,31 +281,35 @@ function RouteSection({ aerodataFlight, selectedAircraft }: SectionProps) {
   const depScheduled = dep.scheduledTime
   const depRevised = dep.revisedTime
   const arrScheduled = arr.scheduledTime
+  const arrRevised = arr.revisedTime
   const arrPredicted = arr.predictedTime
 
   const depDisplayTime = depRevised?.local ?? depScheduled?.local
-  const arrDisplayTime = arrPredicted?.local ?? arrScheduled?.local
+  const arrDisplayTime = arrPredicted?.local ?? arrRevised?.local ?? arrScheduled?.local
 
-  const depTimeStr = depDisplayTime ? extractTime(depDisplayTime) : '--:--'
-  const arrTimeStr = arrDisplayTime ? extractTime(arrDisplayTime) : '--:--'
+  const depTimeStr = formatTimeForDisplay(depDisplayTime, depScheduled?.utc)
+  const arrTimeStr = formatTimeForDisplay(arrDisplayTime, arrScheduled?.utc)
 
-  const depUtc = depScheduled?.utc ? parseUtc(depScheduled.utc) : null
-  const arrUtc = arrScheduled?.utc ? parseUtc(arrScheduled.utc) : null
+  const depUtc = parseUtc(depScheduled?.utc)
+  const arrUtc = parseUtc(arrScheduled?.utc)
   const durationMinutes =
     depUtc && arrUtc
       ? Math.round((arrUtc.getTime() - depUtc.getTime()) / 60_000)
       : null
   const durationStr = durationMinutes ? fmtDuration(durationMinutes) : '—'
 
+  const depDelayMin = computeDelayMinutes(depScheduled?.utc, depRevised?.utc)
+  const arrDelayMin = computeDelayMinutes(arrScheduled?.utc, arrRevised?.utc)
+
   const totalKm = distKm
   const remainingKm =
     selectedAircraft && totalKm > 0
       ? haversineKm(
-          selectedAircraft.lat,
-          selectedAircraft.lon,
-          arr.airport.location.lat,
-          arr.airport.location.lon,
-        )
+        selectedAircraft.lat,
+        selectedAircraft.lon,
+        arr.airport.location.lat,
+        arr.airport.location.lon,
+      )
       : null
   const pct =
     totalKm > 0 && remainingKm != null
@@ -283,7 +317,7 @@ function RouteSection({ aerodataFlight, selectedAircraft }: SectionProps) {
       : null
 
   return (
-    <div className="flex flex-col items-stretch gap-x-4 gap-y-2">
+    <div className="flex flex-col items-stretch gap-x-4 gap-y-3">
       {/* From To Section */}
       <div className="flex items-center gap-2 relative w-full">
         <div className="absolute inset-0 flex items-center justify-center z-0">
@@ -294,53 +328,99 @@ function RouteSection({ aerodataFlight, selectedAircraft }: SectionProps) {
         </div>
         <div className="z-1 flex items-center justify-between w-full">
           {/* Left - Departure */}
-          <div className="flex items-center gap-2 text-left text-base">
-            {/* Code */}
-            <span className="font-bold text-white">
-              {dep.airport.iata ?? dep.airport.icao}
-            </span>
-            {/* Time */}
-            <span className="tabular-nums text-white">{depTimeStr}</span>
+          <div className="flex flex-col items-start h-11">
+            <div className="flex items-center gap-2 text-left">
+              <span className="font-bold text-foreground text-xl">
+                {dep.airport.iata ?? dep.airport.icao}
+              </span>
+              <span className="tabular-nums text-foreground text-xl">{depTimeStr}</span>
+            </div>
+            {depDelayMin != null && (
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={
+                    depDelayMin > 0
+                      ? 'text-xs font-medium text-red-400'
+                      : 'text-xs font-medium text-emerald-400'
+                  }
+                >
+                  {depDelayMin > 0 ? 'Delayed' : 'On Time'}
+                </span>
+                {depDelayMin > 0 && <DelayBadge minutes={depDelayMin} />}
+              </div>
+            )}
           </div>
 
-          {/* Right - Arrival ( code + time ) */}
-          <div className="flex items-center gap-2 text-right text-base">
-            {/* Time */}
-            <span className="tabular-nums text-white">{arrTimeStr}</span>
-            {/* Code */}
-            <span className="font-bold text-white">
-              {arr.airport.iata ?? arr.airport.icao}
-            </span>
+          {/* Right - Arrival */}
+          <div className="flex flex-col items-end h-11">
+            <div className="flex items-center gap-2 text-right">
+              <span className="tabular-nums text-foreground text-xl">{arrTimeStr}</span>
+              <span className="font-bold text-foreground text-xl">
+                {arr.airport.iata ?? arr.airport.icao}
+              </span>
+            </div>
+            {arrDelayMin != null && (
+              <div className="flex items-center gap-1.5 justify-end">
+                <span
+                  className={
+                    arrDelayMin > 0
+                      ? 'text-xs font-medium text-red-400'
+                      : 'text-xs font-medium text-emerald-400'
+                  }
+                >
+                  {arrDelayMin > 0 ? 'Delayed' : 'On Time'}
+                </span>
+                {arrDelayMin > 0 && <DelayBadge minutes={arrDelayMin} />}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Departure */}
-      <div className="flex min-w-0 items-center gap-2 text-sm">
-        <PlaneTakeoff className="size-4 shrink-0 text-neutral-500" />
-        <div className="min-w-0">
-          <span className="font-bold text-white">
-            {dep.airport.iata ?? dep.airport.icao}
-          </span>
-          <span className="text-neutral-400">
-            {' '}
-            • {dep.airport.shortName ?? dep.airport.name}
-          </span>
+      <div className="flex flex-col">
+        <div className="flex min-w-0 items-center gap-2 text-sm">
+          <PlaneTakeoff className="size-4 shrink-0 text-neutral-500" />
+          <div className="min-w-0">
+            <span className="font-bold text-white">
+              {dep.airport.iata ?? dep.airport.icao}
+            </span>
+            <span className="text-neutral-400">
+              {' '}
+              • {dep.airport.shortName ?? dep.airport.name}
+            </span>
+          </div>
         </div>
+        <AirportDetailsRow
+          variant="departure"
+          gate={dep.gate}
+          terminal={dep.terminal}
+          checkInDesk={dep.checkInDesk}
+          runway={dep.runway}
+        />
       </div>
 
       {/* Arrival */}
-      <div className="flex min-w-0 items-center gap-2 text-sm">
-        <PlaneLanding className="size-4 shrink-0 text-neutral-500" />
-        <div className="min-w-0">
-          <span className="font-bold text-white">
-            {arr.airport.iata ?? arr.airport.icao}
-          </span>
-          <span className="text-neutral-400">
-            {' '}
-            • {arr.airport.shortName ?? arr.airport.name}
-          </span>
+      <div className="flex flex-col">
+        <div className="flex min-w-0 items-center gap-2 text-sm">
+          <PlaneLanding className="size-4 shrink-0 text-neutral-500" />
+          <div className="min-w-0">
+            <span className="font-bold text-white">
+              {arr.airport.iata ?? arr.airport.icao}
+            </span>
+            <span className="text-neutral-400">
+              {' '}
+              • {arr.airport.shortName ?? arr.airport.name}
+            </span>
+          </div>
         </div>
+        <AirportDetailsRow
+          variant="arrival"
+          gate={arr.gate}
+          terminal={arr.terminal}
+          checkInDesk={arr.checkInDesk}
+          runway={arr.runway}
+        />
       </div>
 
       {/* Progress Bar */}
@@ -348,7 +428,7 @@ function RouteSection({ aerodataFlight, selectedAircraft }: SectionProps) {
         <>
           <div className="h-1.5 w-full rounded-full bg-neutral-700/60 mt-2">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-300 transition-all"
+              className="h-full rounded-full bg-linear-to-r from-cyan-500 to-cyan-300 transition-all"
               style={{ width: `${pct}%` }}
             />
           </div>
@@ -506,20 +586,11 @@ export function SelectedFlightSheet() {
     (state) => state.aerodataLoading,
   )
   const aerodataError = useSelectedFlightStore((state) => state.aerodataError)
-  const setAerodataFlight = useSelectedFlightStore(
-    (state) => state.setAerodataFlight,
-  )
-  const setAerodataLoading = useSelectedFlightStore(
-    (state) => state.setAerodataLoading,
-  )
-  const setAerodataError = useSelectedFlightStore(
-    (state) => state.setAerodataError,
-  )
   const selectedAircraft = useFlightsStore((state) =>
     selectedIcao24 ? state.map.get(selectedIcao24) : null,
   )
 
-  const fetchFlightByIcao24 = useAction(api.lib.aerodatabox.fetchFlightByIcao24)
+  useSelectedFlightData()
 
   const isDraggingRef = useRef(false)
   const pointerDownPos = useRef<{ x: number; y: number } | null>(null)
@@ -565,31 +636,6 @@ export function SelectedFlightSheet() {
       document.removeEventListener('pointerup', onPointerUp)
     }
   }, [selectedIcao24, setSelectedIcao24])
-
-  useEffect(() => {
-    if (!selectedIcao24) {
-      setAerodataFlight(null)
-      setAerodataError(null)
-      return
-    }
-    setAerodataLoading(true)
-    setAerodataError(null)
-    fetchFlightByIcao24({ icao24: selectedIcao24 })
-      .then((flights) => {
-        setAerodataFlight(flights?.[0] ?? null)
-      })
-      .catch((err) => {
-        setAerodataError(err instanceof Error ? err.message : 'Failed to load')
-        setAerodataFlight(null)
-      })
-      .finally(() => setAerodataLoading(false))
-  }, [
-    selectedIcao24,
-    fetchFlightByIcao24,
-    setAerodataFlight,
-    setAerodataLoading,
-    setAerodataError,
-  ])
 
   const sectionProps: SectionProps = {
     aerodataFlight,

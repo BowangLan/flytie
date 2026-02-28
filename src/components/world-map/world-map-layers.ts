@@ -6,7 +6,6 @@ import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
 const MARKER_SIZE_PX = 22
 const MARKER_MIN_SIZE_PX = 18
 const MARKER_MAX_SIZE_PX = 28
-const ANGLE_OFFSET = -0
 const ROUTE_STEPS = 64
 
 const PLANE_SVG_PATH =
@@ -35,13 +34,94 @@ const PLANE_BORDER_ICON_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURICom
 
 export type RouteSegment = {
   path: [number, number][]
+  type: 'past' | 'future'
 }
 
 type HoverHandler = (info: PickingInfo<AdsbAircraft>) => void
 type SelectHandler = (icao24: string | null) => void
 
+const EARTH_RADIUS_KM = 6371
+const TRACK_CURVE_MIN_KM = 40
+const TRACK_CURVE_MAX_KM = 320
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
+}
+
+function normalizeLongitude(lon: number) {
+
+  return ((lon + 540) % 360) - 180
+}
+
+function unwrapLongitude(lon: number, referenceLon: number) {
+  let nextLon = lon
+  while (nextLon - referenceLon > 180) nextLon -= 360
+  while (nextLon - referenceLon < -180) nextLon += 360
+  return nextLon
+}
+
+/** Compute a point at distance d (km) from (lon, lat) along bearing (degrees, 0=N) */
+function pointAlongBearing(
+  lon: number,
+  lat: number,
+  bearingDeg: number,
+  distanceKm: number,
+): [number, number] {
+  const toRad = Math.PI / 180
+  const latRad = lat * toRad
+  const lonRad = lon * toRad
+  const brngRad = bearingDeg * toRad
+  const d = distanceKm / EARTH_RADIUS_KM
+
+  const lat2 = Math.asin(
+    Math.sin(latRad) * Math.cos(d) +
+      Math.cos(latRad) * Math.sin(d) * Math.cos(brngRad),
+  )
+  const lon2 =
+    lonRad +
+    Math.atan2(
+      Math.sin(brngRad) * Math.sin(d) * Math.cos(latRad),
+      Math.cos(d) - Math.sin(latRad) * Math.sin(lat2),
+    )
+
+  return [(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI]
+}
+
+function haversineDistanceKm(
+  lon1: number,
+  lat1: number,
+  lon2: number,
+  lat2: number,
+) {
+  const toRad = Math.PI / 180
+  const dLat = (lat2 - lat1) * toRad
+  const dLon = (lon2 - lon1) * toRad
+  const lat1Rad = lat1 * toRad
+  const lat2Rad = lat2 * toRad
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLon / 2) ** 2
+
+  return 2 * EARTH_RADIUS_KM * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function initialBearing(
+  lon1: number,
+  lat1: number,
+  lon2: number,
+  lat2: number,
+) {
+  const toRad = Math.PI / 180
+  const toDeg = 180 / Math.PI
+  const lat1Rad = lat1 * toRad
+  const lat2Rad = lat2 * toRad
+  const deltaLonRad = (lon2 - lon1) * toRad
+  const y = Math.sin(deltaLonRad) * Math.cos(lat2Rad)
+  const x =
+    Math.cos(lat1Rad) * Math.sin(lat2Rad) -
+    Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(deltaLonRad)
+
+  return (Math.atan2(y, x) * toDeg + 360) % 360
 }
 
 function colorToRgba(
@@ -83,7 +163,7 @@ function getMarkerBorderColor(
 ) {
   const icao24 = aircraft.hex.toLowerCase()
   if (icao24 === selectedIcao24) {
-    return colorToRgba(WORLD_MAP_COLORS.route, 255)
+    return colorToRgba(WORLD_MAP_COLORS.routeFuture, 255)
   }
   if (icao24 === hoveredIcao24) {
     return colorToRgba(WORLD_MAP_COLORS.label, 255)
@@ -154,25 +234,191 @@ function greatCirclePoint(
   ]
 }
 
-export function buildRouteSegments(
-  lon1: number,
-  lat1: number,
-  lon2: number,
-  lat2: number,
+function pointsToSegments(
+  points: [number, number][],
+  type: 'past' | 'future',
 ): RouteSegment[] {
-  const points: [number, number][] = []
-
-  for (let i = 0; i <= ROUTE_STEPS; i++) {
-    points.push(greatCirclePoint(lon1, lat1, lon2, lat2, i / ROUTE_STEPS))
-  }
-
   const segments: RouteSegment[] = []
-
   for (let i = 0; i < points.length - 1; i++) {
     const start = points[i]
     const end = points[i + 1]
     if (Math.abs(end[0] - start[0]) > 180) continue
-    segments.push({ path: [start, end] })
+    segments.push({ path: [start, end], type })
+  }
+  return segments
+}
+
+function buildCubicCurvePoints(
+  start: [number, number],
+  startControl: [number, number],
+  endControl: [number, number],
+  end: [number, number],
+): [number, number][] {
+  const unwrappedStartLon = start[0]
+  const unwrappedStartControlLon = unwrapLongitude(
+    startControl[0],
+    unwrappedStartLon,
+  )
+  const unwrappedEndControlLon = unwrapLongitude(
+    endControl[0],
+    unwrappedStartControlLon,
+  )
+  const unwrappedEndLon = unwrapLongitude(end[0], unwrappedEndControlLon)
+  const points: [number, number][] = []
+
+  for (let i = 0; i <= ROUTE_STEPS; i++) {
+    const t = i / ROUTE_STEPS
+    const oneMinusT = 1 - t
+    const lon =
+      oneMinusT ** 3 * unwrappedStartLon +
+      3 * oneMinusT * oneMinusT * t * unwrappedStartControlLon +
+      3 * oneMinusT * t * t * unwrappedEndControlLon +
+      t ** 3 * unwrappedEndLon
+    const lat =
+      oneMinusT ** 3 * start[1] +
+      3 * oneMinusT * oneMinusT * t * startControl[1] +
+      3 * oneMinusT * t * t * endControl[1] +
+      t ** 3 * end[1]
+
+    points.push([normalizeLongitude(lon), lat])
+  }
+
+  return points
+}
+
+export function buildRouteSegments(params: {
+  departureLocation?: { lon: number; lat: number }
+  arrivalLocation?: { lon: number; lat: number }
+  currentPosition?: { lon: number; lat: number }
+  track?: number
+}): RouteSegment[] {
+  const { departureLocation, arrivalLocation, currentPosition, track } = params
+
+  const segments: RouteSegment[] = []
+  const hasTrack = track != null && Number.isFinite(track)
+  const getCurveDistance = (distanceKm: number) =>
+    clamp(distanceKm * 0.18, TRACK_CURVE_MIN_KM, TRACK_CURVE_MAX_KM)
+
+  if (departureLocation && currentPosition) {
+    // Constraint: the past section always runs departure -> current position.
+    // When track is available, keep the final tangent aligned with the plane
+    // while keeping the curve on the rear side of the aircraft.
+    const pastPoints: [number, number][] = hasTrack
+      ? buildCubicCurvePoints(
+          [departureLocation.lon, departureLocation.lat],
+          pointAlongBearing(
+            departureLocation.lon,
+            departureLocation.lat,
+            initialBearing(
+              departureLocation.lon,
+              departureLocation.lat,
+              currentPosition.lon,
+              currentPosition.lat,
+            ),
+            getCurveDistance(
+              haversineDistanceKm(
+                departureLocation.lon,
+                departureLocation.lat,
+                currentPosition.lon,
+                currentPosition.lat,
+              ),
+            ),
+          ),
+          pointAlongBearing(
+            currentPosition.lon,
+            currentPosition.lat,
+            track + 180,
+            getCurveDistance(
+              haversineDistanceKm(
+                departureLocation.lon,
+                departureLocation.lat,
+                currentPosition.lon,
+                currentPosition.lat,
+              ),
+            ),
+          ),
+          [currentPosition.lon, currentPosition.lat],
+        )
+      : Array.from({ length: ROUTE_STEPS + 1 }, (_, index) =>
+          greatCirclePoint(
+            departureLocation.lon,
+            departureLocation.lat,
+            currentPosition.lon,
+            currentPosition.lat,
+            index / ROUTE_STEPS,
+          ),
+        )
+    segments.push(...pointsToSegments(pastPoints, 'past'))
+  }
+
+  if (currentPosition && arrivalLocation) {
+    // Constraint: the future section always runs current position -> arrival.
+    // When track is available, keep the initial tangent aligned with the plane
+    // while keeping the curve on the forward side of the aircraft.
+    const futurePoints: [number, number][] = hasTrack
+      ? buildCubicCurvePoints(
+          [currentPosition.lon, currentPosition.lat],
+          pointAlongBearing(
+            currentPosition.lon,
+            currentPosition.lat,
+            track,
+            getCurveDistance(
+              haversineDistanceKm(
+                currentPosition.lon,
+                currentPosition.lat,
+                arrivalLocation.lon,
+                arrivalLocation.lat,
+              ),
+            ),
+          ),
+          pointAlongBearing(
+            arrivalLocation.lon,
+            arrivalLocation.lat,
+            initialBearing(
+              arrivalLocation.lon,
+              arrivalLocation.lat,
+              currentPosition.lon,
+              currentPosition.lat,
+            ),
+            getCurveDistance(
+              haversineDistanceKm(
+                currentPosition.lon,
+                currentPosition.lat,
+                arrivalLocation.lon,
+                arrivalLocation.lat,
+              ),
+            ),
+          ),
+          [arrivalLocation.lon, arrivalLocation.lat],
+        )
+      : Array.from({ length: ROUTE_STEPS + 1 }, (_, index) =>
+          greatCirclePoint(
+            currentPosition.lon,
+            currentPosition.lat,
+            arrivalLocation.lon,
+            arrivalLocation.lat,
+            index / ROUTE_STEPS,
+          ),
+        )
+
+    segments.push(...pointsToSegments(futurePoints, 'future'))
+  }
+
+  // Fallback: full route when no current position (departure → arrival)
+  if (segments.length === 0 && departureLocation && arrivalLocation) {
+    const fullPoints: [number, number][] = []
+    for (let i = 0; i <= ROUTE_STEPS; i++) {
+      fullPoints.push(
+        greatCirclePoint(
+          departureLocation.lon,
+          departureLocation.lat,
+          arrivalLocation.lon,
+          arrivalLocation.lat,
+          i / ROUTE_STEPS,
+        ),
+      )
+    }
+    segments.push(...pointsToSegments(fullPoints, 'future'))
   }
 
   return segments
@@ -203,7 +449,13 @@ export function createWorldMapLayers({
       widthUnits: 'pixels',
       widthMinPixels: 2,
       getWidth: 2,
-      getColor: colorToRgba(WORLD_MAP_COLORS.route, 255),
+      getColor: (segment) =>
+        colorToRgba(
+          segment.type === 'past'
+            ? WORLD_MAP_COLORS.routePast
+            : WORLD_MAP_COLORS.routeFuture,
+          255,
+        ),
       getPath: (segment) => segment.path,
     }),
     new IconLayer<AdsbAircraft>({

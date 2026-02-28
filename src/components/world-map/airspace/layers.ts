@@ -6,7 +6,12 @@ function interpolateZoom(
   ...stops: [number, number][]
 ): DataDrivenPropertyValueSpecification<number> {
   const flat = stops.flatMap(([z, v]) => [z, v])
-  return ['interpolate', ['linear'], ['zoom'], ...flat] satisfies DataDrivenPropertyValueSpecification<number>
+  return [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    ...flat,
+  ] satisfies DataDrivenPropertyValueSpecification<number>
 }
 
 export const AIRSPACE_BOUNDARY_GLOW_LAYER = {
@@ -14,18 +19,8 @@ export const AIRSPACE_BOUNDARY_GLOW_LAYER = {
   type: 'line' as const,
   paint: {
     'line-color': WORLD_MAP_COLORS.airspaceBoundaryGlow,
-    'line-width': interpolateZoom(
-      [1, 0.75],
-      [4, 1.2],
-      [8, 2],
-      [12, 3.5],
-    ),
-    'line-opacity': interpolateZoom(
-      [1, 0.18],
-      [4, 0.24],
-      [8, 0.3],
-      [12, 0.4],
-    ),
+    'line-width': interpolateZoom([1, 0.75], [4, 1.2], [8, 2], [12, 3.5]),
+    'line-opacity': interpolateZoom([1, 0.18], [4, 0.24], [8, 0.3], [12, 0.4]),
     'line-blur': 0.6,
   },
   layout: {
@@ -39,12 +34,7 @@ export const AIRSPACE_BOUNDARY_LINE_LAYER = {
   type: 'line' as const,
   paint: {
     'line-color': WORLD_MAP_COLORS.airspaceBoundary,
-    'line-width': interpolateZoom(
-      [1, 0.4],
-      [4, 0.8],
-      [8, 1.15],
-      [12, 1.75],
-    ),
+    'line-width': interpolateZoom([1, 0.4], [4, 0.8], [8, 1.15], [12, 1.75]),
     'line-opacity': interpolateZoom(
       [1, 0.45],
       [4, 0.58],

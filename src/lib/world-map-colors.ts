@@ -11,5 +11,6 @@ export const WORLD_MAP_COLORS = {
   marker: COLORS.NEUTRAL_400,
   markerHover: COLORS.NEUTRAL_200,
   markerSelected: COLORS.PRIMARY,
-  route: COLORS.NEUTRAL_100,
+  routeFuture: COLORS.NEUTRAL_500,
+  routePast: COLORS.PRIMARY,
 } as const

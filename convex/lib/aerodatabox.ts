@@ -167,7 +167,54 @@ export interface AerodataboxFlight {
   lastUpdatedUtc: string
   location?: AerodataboxFlightLocation
   number: string
-  status: string
+
+  /**
+   * Flight progress status.
+   * 
+   * Possible values:
+   *   0 - Unknown: Status is not available for this flight
+   *   1 - Expected: Expected
+   *   2 - EnRoute: En route
+   *   3 - CheckIn: Check-in is open
+   *   4 - Boarding: Boarding in progress / Last call
+   *   5 - GateClosed: Gate closed
+   *   6 - Departed: Departed
+   *   7 - Delayed: Delayed
+   *   8 - Approaching: On approach to destination
+   *   9 - Arrived: Arrived
+   *   10 - Canceled: Cancelled
+   *   11 - Diverted: Diverted to another destination
+   *   12 - CanceledUncertain: Status of the flight is uncertain, may be cancelled
+   * 
+   * Allowed string values:
+   *   "Unknown"
+   *   "Expected"
+   *   "EnRoute"
+   *   "CheckIn"
+   *   "Boarding"
+   *   "GateClosed"
+   *   "Departed"
+   *   "Delayed"
+   *   "Approaching"
+   *   "Arrived"
+   *   "Canceled"
+   *   "Diverted"
+   *   "CanceledUncertain"
+   */
+  status: 
+    | 'Unknown'
+    | 'Expected'
+    | 'EnRoute'
+    | 'CheckIn'
+    | 'Boarding'
+    | 'GateClosed'
+    | 'Departed'
+    | 'Delayed'
+    | 'Approaching'
+    | 'Arrived'
+    | 'Canceled'
+    | 'Diverted'
+    | 'CanceledUncertain'
 }
 
 export type AerodataboxFlightByIcao24Response = AerodataboxFlight[]
@@ -199,7 +246,7 @@ export const fetchFlightByIcao24 = action({
     const res = await fetch(url, {
       method: 'GET',
       headers: {
-        Accept: 'application/json, application/xml',
+        Accept: 'application/json',
         'X-RapidAPI-Key': RAPIDAPI_KEY,
         'X-RapidAPI-Host': RAPIDAPI_HOST,
       },
@@ -208,7 +255,12 @@ export const fetchFlightByIcao24 = action({
       throw new Error(
         `AeroDataBox API error: ${res.status}: ${await res.text()}`,
       )
-    const data = (await res.json()) as AerodataboxFlightByIcao24Response
-    return data
+    try {
+      const data = (await res.json()) as AerodataboxFlightByIcao24Response
+      return data
+    } catch (error) {
+      console.error('[fetchFlightByIcao24] error parsing response:', error)
+      throw error
+    }
   },
 })
