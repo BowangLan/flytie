@@ -14,6 +14,7 @@ import {
   PlaneLanding,
   PlaneTakeoff,
   TowerControl,
+  X,
 } from 'lucide-react'
 import { useAction } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
@@ -27,6 +28,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '#/components/ui/sheet'
+import { Button } from '#/components/ui/button'
 
 function fmtNumber(n: number, digits = 0) {
   if (isNaN(n)) return 'N/A'
@@ -141,7 +143,7 @@ function getStatusBadgeVariant(status: string): string {
   return 'border-cyan-300/40 bg-cyan-300/15 text-cyan-100'
 }
 
-function HeaderSection({ aerodataFlight, selectedAircraft }: SectionProps) {
+function HeaderSection({ aerodataFlight, selectedAircraft, onClose }: SectionProps & { onClose: () => void }) {
   const callsign =
     selectedAircraft?.flight?.trim() ?? aerodataFlight?.callSign?.trim() ?? ''
   const icao24 =
@@ -155,29 +157,35 @@ function HeaderSection({ aerodataFlight, selectedAircraft }: SectionProps) {
   return (
     <>
       <div className="relative flex items-start justify-between gap-3">
-        <div>
+        <div className="flex-1 flex flex-col gap-2">
           <SheetTitle className="font-mono text-xl font-semibold text-white">
             {callsign || icao24 || 'Selected Flight'}
           </SheetTitle>
-          {callsign && (
-            <div className="mt-1 text-xs text-neutral-500 uppercase">
-              ICAO24: <span className="font-mono">{icao24}</span>
+          <div className="flex flex-col items-start gap-1">
+            <div className="text-xs text-neutral-500">
+              ICAO24: <span className="font-mono text-foreground/80 font-semibold">{icao24}</span>
             </div>
-          )}
-          {aerodataFlight?.aircraft?.model?.trim() && (
-            <div className="mt-1 text-xs text-neutral-400">
-              {aerodataFlight.aircraft.model.trim()}
-            </div>
-          )}
+            {aerodataFlight?.aircraft?.model?.trim() && (
+              <div className="text-xs text-neutral-500">
+                Type: <span className="text-foreground/80 font-semibold">
+                  {aerodataFlight.aircraft.model.trim()}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
 
         {hasStatus && (
           <span
-            className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.12em] uppercase ${getStatusBadgeVariant(statusLabel)}`}
+            className={`rounded-lg border px-2.5 py-1 text-[10px] font-semibold tracking-[0.12em] uppercase ${getStatusBadgeVariant(statusLabel)}`}
           >
             {statusLabel}
           </span>
         )}
+
+        <Button variant="ghost" size="icon" onClick={onClose}>
+          <X className="size-4" />
+        </Button>
       </div>
 
       {(selectedAircraft?.r || selectedAircraft?.t) && (
@@ -256,11 +264,11 @@ function RouteSection({ aerodataFlight, selectedAircraft }: SectionProps) {
   const remainingKm =
     selectedAircraft && totalKm > 0
       ? haversineKm(
-          selectedAircraft.lat,
-          selectedAircraft.lon,
-          arr.airport.location.lat,
-          arr.airport.location.lon,
-        )
+        selectedAircraft.lat,
+        selectedAircraft.lon,
+        arr.airport.location.lat,
+        arr.airport.location.lon,
+      )
       : null
   const pct =
     totalKm > 0 && remainingKm != null
@@ -599,7 +607,7 @@ export function SelectedFlightSheet() {
         onInteractOutside={(e) => e.preventDefault()}
       >
         <SheetHeader className="border-b border-neutral-800 bg-zinc-950 px-4 py-4">
-          <HeaderSection {...sectionProps} />
+          <HeaderSection {...sectionProps} onClose={() => setSelectedIcao24(null)} />
         </SheetHeader>
 
         {!selectedAircraft ? (
