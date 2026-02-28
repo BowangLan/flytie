@@ -49,9 +49,11 @@ export function useWorldMapData(
     }
 
     loadAircraft()
+    const intervalId = setInterval(loadAircraft, 10_000)
 
     return () => {
       cancelled = true
+      clearInterval(intervalId)
     }
   }, [resolvedDataSource])
 
