@@ -6,7 +6,6 @@ export const GEOJSON_URL =
 
 export type WorldMapDataSnapshot = {
   aircraft: AdsbAircraft[]
-  features: Feature[]
 }
 
 export type WorldMapDataSource = {

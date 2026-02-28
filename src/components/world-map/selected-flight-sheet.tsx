@@ -1,10 +1,11 @@
-import { useEffect, useRef  } from 'react'
-import type {ReactNode} from 'react';
+import { useEffect, useRef } from 'react'
+import type { ReactNode } from 'react';
 import {
   Activity,
   ArrowDown,
   ArrowRight,
   ArrowUp,
+  Building2,
   Clock,
   Compass,
   Gauge,
@@ -60,15 +61,6 @@ function fmtDuration(minutes: number): string {
   return m ? `${h}h ${m}m` : `${h}h`
 }
 
-/** Format time until target from now */
-function fmtTimeUntil(target: Date): string {
-  const now = new Date()
-  const ms = target.getTime() - now.getTime()
-  const minutes = Math.round(ms / 60_000)
-  if (minutes < 0) return 'Past'
-  return fmtDuration(minutes)
-}
-
 function haversineKm(
   lat1: number,
   lon1: number,
@@ -81,8 +73,8 @@ function haversineKm(
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
@@ -115,6 +107,40 @@ type SectionProps = {
   selectedAircraft: AdsbAircraft | null
 }
 
+/** Derive status from Aerodatabox when available, else ADS-B altitude */
+function getStatusLabel(
+  aerodataFlight: AerodataboxFlight | null,
+  selectedAircraft: AdsbAircraft | null,
+): string {
+  if (aerodataFlight?.status?.trim()) {
+    return aerodataFlight.status.trim()
+  }
+  const isOnGround = (selectedAircraft?.alt_baro ?? 0) < 500
+  return isOnGround ? 'On Ground' : 'Airborne'
+}
+
+/** Map status string to badge variant */
+function getStatusBadgeVariant(status: string): string {
+  const s = status.toLowerCase()
+  if (s.includes('cancel') || s.includes('divert') || s.includes('incident'))
+    return 'border-rose-300/40 bg-rose-300/15 text-rose-100'
+  if (
+    s.includes('land') ||
+    s.includes('ground') ||
+    s.includes('arrived') ||
+    s.includes('arrival')
+  )
+    return 'border-amber-300/40 bg-amber-300/15 text-amber-100'
+  if (
+    s.includes('active') ||
+    s.includes('airborne') ||
+    s.includes('enroute') ||
+    s.includes('departed')
+  )
+    return 'border-emerald-300/40 bg-emerald-300/15 text-emerald-100'
+  return 'border-cyan-300/40 bg-cyan-300/15 text-cyan-100'
+}
+
 function HeaderSection({ aerodataFlight, selectedAircraft }: SectionProps) {
   const callsign =
     selectedAircraft?.flight?.trim() ?? aerodataFlight?.callSign?.trim() ?? ''
@@ -122,8 +148,9 @@ function HeaderSection({ aerodataFlight, selectedAircraft }: SectionProps) {
     selectedAircraft?.hex.toUpperCase() ??
     aerodataFlight?.aircraft?.modeS?.toUpperCase() ??
     ''
-  const isOnGround = (selectedAircraft?.alt_baro ?? 0) < 500
-  const statusLabel = isOnGround ? 'On Ground' : 'Airborne'
+  const statusLabel = getStatusLabel(aerodataFlight, selectedAircraft)
+  const hasStatus =
+    aerodataFlight?.status?.trim() || selectedAircraft != null
 
   return (
     <>
@@ -137,15 +164,16 @@ function HeaderSection({ aerodataFlight, selectedAircraft }: SectionProps) {
               ICAO24: <span className="font-mono">{icao24}</span>
             </div>
           )}
+          {aerodataFlight?.aircraft?.model?.trim() && (
+            <div className="mt-1 text-xs text-neutral-400">
+              {aerodataFlight.aircraft.model.trim()}
+            </div>
+          )}
         </div>
 
-        {selectedAircraft && (
+        {hasStatus && (
           <span
-            className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.12em] uppercase ${
-              isOnGround
-                ? 'border-amber-300/40 bg-amber-300/15 text-amber-100'
-                : 'border-emerald-300/40 bg-emerald-300/15 text-emerald-100'
-            }`}
+            className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.12em] uppercase ${getStatusBadgeVariant(statusLabel)}`}
           >
             {statusLabel}
           </span>
@@ -192,7 +220,7 @@ function GateBadge({
   )
 }
 
-function RouteSection({ aerodataFlight }: SectionProps) {
+function RouteSection({ aerodataFlight, selectedAircraft }: SectionProps) {
   if (!aerodataFlight) {
     return (
       <div className="text-sm text-neutral-400">
@@ -224,137 +252,109 @@ function RouteSection({ aerodataFlight }: SectionProps) {
       : null
   const durationStr = durationMinutes ? fmtDuration(durationMinutes) : '—'
 
-  const depTimeUntil = depUtc ? fmtTimeUntil(depUtc) : null
-  const arrTimeUntil = arrUtc ? fmtTimeUntil(arrUtc) : null
+  const totalKm = distKm
+  const remainingKm =
+    selectedAircraft && totalKm > 0
+      ? haversineKm(
+          selectedAircraft.lat,
+          selectedAircraft.lon,
+          arr.airport.location.lat,
+          arr.airport.location.lon,
+        )
+      : null
+  const pct =
+    totalKm > 0 && remainingKm != null
+      ? Math.min(100, Math.max(0, ((totalKm - remainingKm) / totalKm) * 100))
+      : null
 
   return (
-    <div className="space-y-0">
-      {/* Departure section */}
-      <div className="flex items-start justify-between gap-4 pb-5">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 text-sm">
-            <PlaneTakeoff className="size-4 shrink-0 text-neutral-500" />
-            <span>
-              <span className="font-bold text-white">
-                {dep.airport.iata ?? dep.airport.icao}
-              </span>
-              <span className="text-neutral-400">
-                {' '}
-                • {dep.airport.shortName ?? dep.airport.name}
-              </span>
+    <div className="flex flex-col items-stretch gap-x-4 gap-y-2">
+      {/* From To Section */}
+      <div className="flex items-center gap-2 relative w-full">
+        <div className="absolute inset-0 flex items-center justify-center z-0">
+          <Plane className="size-5 text-foreground rotate-45" fill="currentColor" />
+        </div>
+        <div className="z-1 flex items-center justify-between w-full">
+          {/* Left - Departure */}
+          <div className='flex items-center gap-2 text-left text-base'>
+            {/* Code */}
+            <span className="font-bold text-white">
+              {dep.airport.iata ?? dep.airport.icao}
+            </span>
+            {/* Time */}
+            <span className="tabular-nums text-white">
+              {depTimeStr}
             </span>
           </div>
-          <div className="mt-2 text-3xl font-bold tabular-nums text-white">
-            {depTimeStr}
-          </div>
-          <div className="mt-1.5 text-sm text-neutral-400">
-            Departs in {depTimeUntil ?? '—'}
-          </div>
-          <div className="mt-2 flex items-center gap-2 text-xs text-neutral-500">
-            <Clock className="size-3.5" />
-            <span>
-              {durationStr} • {fmtNumber(distKm)} km
+
+          {/* Right - Arrival ( code + time ) */}
+          <div className='flex items-center gap-2 text-right text-base'>
+            {/* Time */}
+            <span className="tabular-nums text-white">
+              {arrTimeStr}
+            </span>
+            {/* Code */}
+            <span className="font-bold text-white">
+              {arr.airport.iata ?? arr.airport.icao}
             </span>
           </div>
         </div>
-        {/* <GateBadge
-          gate={dep.gate}
-          terminal={dep.terminal}
-          variant="departure"
-        /> */}
       </div>
 
-      {/* Separator */}
-      <div className="border-t border-neutral-700" />
+      {/* Departure */}
+      <div className="flex min-w-0 items-center gap-2 text-sm">
+        <PlaneTakeoff className="size-4 shrink-0 text-neutral-500" />
+        <div className="min-w-0">
+          <span className="font-bold text-white">
+            {dep.airport.iata ?? dep.airport.icao}
+          </span>
+          <span className="text-neutral-400">
+            {' '}
+            • {dep.airport.shortName ?? dep.airport.name}
+          </span>
+        </div>
+      </div>
 
-      {/* Arrival section */}
-      <div className="flex items-start justify-between gap-4 pt-5">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 text-sm">
-            <PlaneLanding className="size-4 shrink-0 text-neutral-500" />
-            <span>
-              <span className="font-bold text-white">
-                {arr.airport.iata ?? arr.airport.icao}
-              </span>
-              <span className="text-neutral-400">
-                {' '}
-                • {arr.airport.shortName ?? arr.airport.name}
-              </span>
+      {/* Arrival */}
+      <div className="flex min-w-0 items-center gap-2 text-sm">
+        <PlaneLanding className="size-4 shrink-0 text-neutral-500" />
+        <div className="min-w-0">
+          <span className="font-bold text-white">
+            {arr.airport.iata ?? arr.airport.icao}
+          </span>
+          <span className="text-neutral-400">
+            {' '}
+            • {arr.airport.shortName ?? arr.airport.name}
+          </span>
+        </div>
+      </div>
+
+      {/* Progress Bar */}
+      {pct != null && (
+        <>
+          <div className="h-1.5 w-full rounded-full bg-neutral-700/60 mt-2">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-300 transition-all"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between text-xs text-neutral-500">
+            <span className="font-mono tabular-nums">
+              {fmtNumber(Math.round(totalKm))} km total
+            </span>
+            <span className="font-mono tabular-nums">
+              {fmtNumber(Math.round(remainingKm!))} km remaining
             </span>
           </div>
-          <div className="mt-2 text-3xl font-bold tabular-nums text-white">
-            {arrTimeStr}
-          </div>
-          <div className="mt-1.5 text-sm text-neutral-400">
-            Arrives in {arrTimeUntil ?? '—'}
-          </div>
-        </div>
-        {/* <GateBadge
-          gate={arr.gate}
-          terminal={arr.terminal}
-          variant="arrival"
-        /> */}
-      </div>
-    </div>
-  )
-}
+        </>
+      )}
 
-function FlightProgressSection({
-  aerodataFlight,
-  selectedAircraft,
-}: SectionProps) {
-  const totalKm = aerodataFlight?.greatCircleDistance?.km
-  if (!aerodataFlight || !selectedAircraft || !totalKm) return null
-
-  const { lat: destLat, lon: destLon } = aerodataFlight.arrival.airport.location
-  const remainingKm = haversineKm(
-    selectedAircraft.lat,
-    selectedAircraft.lon,
-    destLat,
-    destLon,
-  )
-
-  const pct = Math.min(
-    100,
-    Math.max(0, ((totalKm - remainingKm) / totalKm) * 100),
-  )
-  const remainingDisplay = fmtNumber(Math.round(remainingKm))
-  const depIata =
-    aerodataFlight.departure.airport.iata ??
-    aerodataFlight.departure.airport.icao
-  const arrIata =
-    aerodataFlight.arrival.airport.iata ?? aerodataFlight.arrival.airport.icao
-
-  return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900/80 p-4 space-y-3">
-      {/* Airport labels */}
-      <div className="flex items-center justify-between text-xs text-neutral-500 font-mono">
-        <span className="text-neutral-300 font-semibold">{depIata}</span>
-        <span className="text-neutral-500">{fmtNumber(pct, 1)}% complete</span>
-        <span className="text-neutral-300 font-semibold">{arrIata}</span>
-      </div>
-
-      {/* Progress bar */}
-      <div className="relative h-1.5 w-full rounded-full bg-neutral-700/60">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-300 transition-all"
-          style={{ width: `${pct}%` }}
-        />
-        {/* Plane icon marker */}
-        <div
-          className="absolute -top-[7px] -translate-x-1/2"
-          style={{ left: `${pct}%` }}
-        >
-          <Plane className="size-3.5 text-cyan-300 -rotate-45" />
-        </div>
-      </div>
-
-      {/* Remaining distance */}
-      <div className="text-xs text-neutral-500 text-right">
-        <span className="text-neutral-300 font-mono tabular-nums">
-          {remainingDisplay} km
-        </span>{' '}
-        remaining
+      {/* Times & duration */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+        <span className="flex items-center gap-1.5 text-sm text-neutral-500 font-mono">
+          <Clock className="size-4" />
+          {durationStr}
+        </span>
       </div>
     </div>
   )
@@ -417,6 +417,33 @@ function MetricsSection({ selectedAircraft }: SectionProps) {
                 : 'text-amber-300'
         }
       />
+    </div>
+  )
+}
+
+function AirlineSection({ aerodataFlight }: SectionProps) {
+  if (!aerodataFlight?.airline) return null
+
+  const airline = aerodataFlight.airline
+  const codes = [airline.iata, airline.icao].filter(Boolean).join(' · ')
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-neutral-900/70 p-3.5">
+      <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold tracking-[0.14em] text-neutral-400 uppercase">
+        <Building2 className="size-3.5" />
+        Airline
+      </div>
+      <div className="space-y-1.5">
+        <div className="text-base font-semibold text-white">{airline.name}</div>
+        {codes && (
+          <div className="text-xs font-mono text-neutral-500">{codes}</div>
+        )}
+        {aerodataFlight.isCargo && (
+          <span className="inline-block rounded border border-amber-300/40 bg-amber-300/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-200">
+            Cargo
+          </span>
+        )}
+      </div>
     </div>
   )
 }
@@ -594,7 +621,7 @@ export function SelectedFlightSheet() {
               )}
             </div>
 
-            <FlightProgressSection {...sectionProps} />
+            <AirlineSection {...sectionProps} />
             <MetricsSection {...sectionProps} />
             <TimelineSection {...sectionProps} />
           </div>

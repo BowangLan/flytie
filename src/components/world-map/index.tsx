@@ -1,344 +1,262 @@
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { MapControls } from '@react-three/drei'
+import { MapboxOverlay, type MapboxOverlayProps } from '@deck.gl/mapbox'
+import { IconLayer, PathLayer } from '@deck.gl/layers'
+import type { PickingInfo } from '@deck.gl/core'
+import maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
 import {
-  memo,
   startTransition,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
-import * as THREE from 'three'
-import type { MapControls as MapControlsImpl } from 'three-stdlib'
+import Map, {
+  useControl,
+  type MapRef,
+  type ViewState,
+  type ViewStateChangeEvent,
+} from 'react-map-gl/maplibre'
+import type { Map as MapLibreMap } from 'maplibre-gl'
 import type { AdsbAircraft } from './flights'
+import { COLORS } from '@/lib/colors'
 import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
-import { Countries, CountryOutlines, CountryLabels } from './country'
-import type { Feature, GetColorFn } from './country'
-import { FlightMarkers } from './flight-markers'
 import { FlightTooltip } from './flight-tooltip'
 import type { TooltipData } from './flight-tooltip'
-import { SelectedFlightRoute } from './selected-flight-route'
 import { SelectedFlightSheet } from './selected-flight-sheet'
 import { useSelectedFlightStore } from '#/store/selected-flight.store'
-import { MapLegend } from './map-legend'
-import type { CameraState } from './map-legend'
+import { MapLegend, type CameraState } from './map-legend'
 import type { WorldMapDataSource } from './data-source'
 import { useWorldMapData } from './use-world-map-data'
 
-const WORLD_X = 180
-const WORLD_Y = 90
-const MAX_ZOOM = 600
+const INITIAL_VIEW_STATE: ViewState = {
+  longitude: 0,
+  latitude: 20,
+  zoom: 4,
+  bearing: 0,
+  pitch: 0,
+  padding: { top: 0, bottom: 0, left: 0, right: 0 },
+}
+const MIN_ZOOM = 1
+const MAX_ZOOM = 8
+const MAP_STYLE =
+  'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
+const MAP_BACKGROUND = COLORS.NEUTRAL_1000
+const MAP_OCEAN = COLORS.NEUTRAL_1000
+const MAP_OCEAN_LINE = COLORS.NEUTRAL_800
+const MAP_LAND = COLORS.NEUTRAL_800
+const MAP_BOUNDARY = COLORS.NEUTRAL_700
+const MAP_COUNTRY_LABEL = COLORS.NEUTRAL_500
+const MAP_PLACE_LABEL = COLORS.NEUTRAL_400
+const MAP_WATER_LABEL = COLORS.NEUTRAL_600
+const MARKER_SIZE_PX = 22
+const MARKER_MIN_SIZE_PX = 18
+const MARKER_MAX_SIZE_PX = 28
+const ANGLE_OFFSET = -180
 
-/** 'wheel' — two-finger scroll pans, pinch zooms.
- *  'drag'  — left-click drag pans, scroll wheel zooms. */
-const PAN_MODE: 'wheel' | 'drag' = 'drag'
+const PLANE_SVG_PATH =
+  'M21 16.2632V14.3684L13.4211 9.63158V4.42105C13.4211 3.63474 12.7863 3 12 3C11.2137 3 10.5789 3.63474 10.5789 4.42105V9.63158L3 14.3684V16.2632L10.5789 13.8947V19.1053L8.68421 20.5263V21.9474L12 21L15.3158 21.9474V20.5263L13.4211 19.1053V13.8947L21 16.2632Z'
 
-function CameraConstraints({
-  controlsRef,
-}: {
-  controlsRef: React.RefObject<MapControlsImpl | null>
-}) {
-  const { camera, size } = useThree()
+const PLANE_ATLAS_SIZE = 128
+const PLANE_ICON_MAPPING = {
+  plane: {
+    x: 0,
+    y: 0,
+    width: PLANE_ATLAS_SIZE,
+    height: PLANE_ATLAS_SIZE,
+    anchorX: PLANE_ATLAS_SIZE / 2,
+    anchorY: PLANE_ATLAS_SIZE / 2,
+    mask: true,
+  },
+}
 
-  useFrame(() => {
-    if (!(camera instanceof THREE.OrthographicCamera)) return
+const PLANE_ICON_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${PLANE_ATLAS_SIZE}" height="${PLANE_ATLAS_SIZE}" viewBox="0 0 24 24" fill="black"><path d="${PLANE_SVG_PATH}"/></svg>`,
+)}`
 
-    // Minimum zoom: world fits in view on at least one axis
-    const minZoom = Math.min(
-      size.width / (WORLD_X * 2),
-      size.height / (WORLD_Y * 2),
-    )
-    if (camera.zoom < minZoom) {
-      camera.zoom = minZoom
-      camera.updateProjectionMatrix()
-    }
+const PLANE_BORDER_ICON_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${PLANE_ATLAS_SIZE}" height="${PLANE_ATLAS_SIZE}" viewBox="0 0 24 24"><path d="${PLANE_SVG_PATH}" fill="black" stroke="black" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/></svg>`,
+)}`
 
-    const halfW = size.width / (2 * camera.zoom)
-    const halfH = size.height / (2 * camera.zoom)
+type CursorCoord = { lon: number; lat: number } | null
 
-    // If visible half-extent >= world half-extent on an axis, lock to center
-    const cx =
-      halfW >= WORLD_X
-        ? 0
-        : Math.max(
-            -WORLD_X + halfW,
-            Math.min(WORLD_X - halfW, camera.position.x),
-          )
-    const cy =
-      halfH >= WORLD_Y
-        ? 0
-        : Math.max(
-            -WORLD_Y + halfH,
-            Math.min(WORLD_Y - halfH, camera.position.y),
-          )
+type RouteSegment = {
+  path: [number, number][]
+}
 
-    camera.position.x = cx
-    camera.position.y = cy
+const FILL_OVERRIDES = [
+  ['background', 'background-color', MAP_BACKGROUND],
+  ['landcover', 'fill-color', MAP_LAND],
+  ['landuse', 'fill-color', MAP_LAND],
+  ['landuse_residential', 'fill-color', 'rgba(38, 38, 38, 0.45)'],
+  ['water', 'fill-color', MAP_OCEAN],
+  ['water_shadow', 'fill-color', 'rgba(10, 10, 10, 0.9)'],
+  ['waterway', 'line-color', MAP_OCEAN_LINE],
+  ['boundary_country_outline', 'line-color', 'rgba(10, 10, 10, 0.96)'],
+  ['boundary_country_inner', 'line-color', MAP_BOUNDARY],
+] as const
 
-    // Sync controls target so damping doesn't snap back past the boundary
-    if (controlsRef.current) {
-      controlsRef.current.target.x = cx
-      controlsRef.current.target.y = cy
-    }
-  })
+const LABEL_OVERRIDES = [
+  ['place_country_1', MAP_COUNTRY_LABEL, 'rgba(10, 10, 10, 0.96)', 1.2],
+  ['place_country_2', MAP_COUNTRY_LABEL, 'rgba(10, 10, 10, 0.96)', 1.2],
+  ['place_state', COLORS.NEUTRAL_600, 'rgba(10, 10, 10, 0.96)', 1],
+  ['place_continent', COLORS.NEUTRAL_700, 'rgba(10, 10, 10, 0.96)', 1],
+  ['place_city_r6', MAP_PLACE_LABEL, 'rgba(10, 10, 10, 0.96)', 1],
+  ['place_city_r5', MAP_PLACE_LABEL, 'rgba(10, 10, 10, 0.96)', 1],
+  ['place_town', COLORS.NEUTRAL_500, 'rgba(10, 10, 10, 0.94)', 1],
+  ['place_villages', COLORS.NEUTRAL_600, 'rgba(10, 10, 10, 0.94)', 1],
+  ['place_suburbs', COLORS.NEUTRAL_600, 'rgba(10, 10, 10, 0.94)', 1],
+  ['place_hamlet', COLORS.NEUTRAL_700, 'rgba(10, 10, 10, 0.94)', 1],
+  ['watername_ocean', MAP_WATER_LABEL, 'rgba(10, 10, 10, 0.96)', 1.1],
+  ['watername_sea', MAP_WATER_LABEL, 'rgba(10, 10, 10, 0.96)', 1.1],
+  ['watername_lake', COLORS.NEUTRAL_600, 'rgba(10, 10, 10, 0.96)', 1],
+  ['watername_lake_line', COLORS.NEUTRAL_600, 'rgba(10, 10, 10, 0.96)', 1],
+  ['waterway_label', COLORS.NEUTRAL_600, 'rgba(10, 10, 10, 0.96)', 1],
+] as const
 
+function DeckGLOverlay(props: MapboxOverlayProps) {
+  const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay(props))
+  overlay.setProps(props)
   return null
 }
 
-/**
- * Intercepts wheel events on the canvas so that two-finger scroll pans the map
- * and pinch (ctrlKey) zooms it. MapControls' built-in zoom must be disabled to
- * prevent double-handling.
- */
-function WheelPan({
-  controlsRef,
-}: {
-  controlsRef: React.RefObject<MapControlsImpl | null>
-}) {
-  const { camera, gl } = useThree()
-
-  useEffect(() => {
-    const el = gl.domElement
-
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      if (!(camera instanceof THREE.OrthographicCamera)) return
-
-      if (e.ctrlKey) {
-        // Pinch gesture — zoom around cursor position
-        const factor = Math.pow(0.999, e.deltaY)
-        camera.zoom = Math.min(MAX_ZOOM, camera.zoom * factor)
-        camera.updateProjectionMatrix()
-      } else {
-        // Two-finger scroll — pan
-        const dx = e.deltaX / camera.zoom
-        const dy = e.deltaY / camera.zoom
-        camera.position.x += dx
-        camera.position.y -= dy
-        if (controlsRef.current) {
-          controlsRef.current.target.x += dx
-          controlsRef.current.target.y -= dy
-        }
-      }
-    }
-
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [camera, gl, controlsRef])
-
-  return null
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
 }
 
-/** Converts pointer position to lon/lat and reports via callback. Uses document-level
- *  pointermove so we get events even when overlays (tooltip, sheet) may block the canvas. */
-function CursorTracker({
-  onCursorMove,
-}: {
-  onCursorMove: (coord: { lon: number; lat: number } | null) => void
-}) {
-  const { camera, gl } = useThree()
-  const onCursorMoveRef = useRef(onCursorMove)
+function colorToRgba(
+  color: string,
+  alpha = 255,
+): [number, number, number, number] {
+  const hex = color.replace('#', '')
+  const normalized =
+    hex.length === 3
+      ? hex
+          .split('')
+          .map((char) => `${char}${char}`)
+          .join('')
+      : hex
 
-  useEffect(() => {
-    onCursorMoveRef.current = onCursorMove
-  }, [onCursorMove])
-
-  useEffect(() => {
-    const el = gl.domElement
-    let frameId: number | null = null
-    let pendingCoord: { lon: number; lat: number } | null = null
-
-    const flush = () => {
-      frameId = null
-      onCursorMoveRef.current(pendingCoord)
-    }
-
-    const onPointerMove = (e: PointerEvent) => {
-      const cam = camera as THREE.OrthographicCamera
-      if (!cam.isOrthographicCamera) return
-      const rect = el.getBoundingClientRect()
-      if (
-        e.clientX < rect.left ||
-        e.clientX > rect.right ||
-        e.clientY < rect.top ||
-        e.clientY > rect.bottom
-      ) {
-        pendingCoord = null
-        if (frameId === null) frameId = requestAnimationFrame(flush)
-        return
-      }
-      const normX = (e.clientX - rect.left) / rect.width
-      const normY = (e.clientY - rect.top) / rect.height
-      const halfW = cam.right / cam.zoom
-      const halfH = cam.top / cam.zoom
-      const lon = THREE.MathUtils.clamp(
-        cam.position.x - halfW + normX * (2 * halfW),
-        -WORLD_X,
-        WORLD_X,
-      )
-      const lat = THREE.MathUtils.clamp(
-        cam.position.y + halfH - normY * (2 * halfH),
-        -WORLD_Y,
-        WORLD_Y,
-      )
-      pendingCoord = { lon, lat }
-      if (frameId === null) frameId = requestAnimationFrame(flush)
-    }
-
-    document.addEventListener('pointermove', onPointerMove)
-    return () => {
-      document.removeEventListener('pointermove', onPointerMove)
-      if (frameId !== null) cancelAnimationFrame(frameId)
-    }
-  }, [camera, gl])
-
-  return null
+  const int = Number.parseInt(normalized, 16)
+  return [(int >> 16) & 255, (int >> 8) & 255, int & 255, alpha]
 }
 
-/** Reads camera position+zoom each frame; calls onUpdate only when values change. */
-function CameraInfo({ onUpdate }: { onUpdate: (s: CameraState) => void }) {
-  const { camera } = useThree()
-  const prev = useRef<CameraState>({ lon: [0, 0], lat: [0, 0], zoom: 0 })
-
-  useFrame(() => {
-    if (!(camera instanceof THREE.OrthographicCamera)) return
-    const halfW = camera.right / camera.zoom
-    const halfH = camera.top / camera.zoom
-    const lon: [number, number] = [
-      Math.max(-WORLD_X, camera.position.x - halfW),
-      Math.min(WORLD_X, camera.position.x + halfW),
-    ]
-    const lat: [number, number] = [
-      Math.max(-WORLD_Y, camera.position.y - halfH),
-      Math.min(WORLD_Y, camera.position.y + halfH),
-    ]
-    const { zoom } = camera
-    const p = prev.current
-    if (
-      Math.abs(lon[0] - p.lon[0]) > 0.01 ||
-      Math.abs(lon[1] - p.lon[1]) > 0.01 ||
-      Math.abs(lat[0] - p.lat[0]) > 0.01 ||
-      Math.abs(lat[1] - p.lat[1]) > 0.01 ||
-      Math.abs(zoom - p.zoom) > 0.1
-    ) {
-      prev.current = { lon, lat, zoom }
-      onUpdate({ lon, lat, zoom })
-    }
-  })
-
-  return null
+function getMarkerColor(
+  aircraft: AdsbAircraft,
+  selectedIcao24: string | null,
+  hoveredIcao24: string | null,
+) {
+  const icao24 = aircraft.hex.toLowerCase()
+  if (icao24 === selectedIcao24) {
+    return colorToRgba(WORLD_MAP_COLORS.markerSelected, 255)
+  }
+  if (icao24 === hoveredIcao24) {
+    return colorToRgba(WORLD_MAP_COLORS.markerHover, 255)
+  }
+  return colorToRgba(WORLD_MAP_COLORS.marker, 255)
 }
 
-// ─── Scene ────────────────────────────────────────────────────────────────────
-
-function WorldScene({
-  aircraft,
-  features,
-  getColor,
-  onHover,
-  onCameraUpdate,
-  onCursorMove,
-  onFlightClick,
-}: {
-  aircraft: AdsbAircraft[]
-  features: Feature[]
-  getColor?: GetColorFn
-  onHover?: (aircraft: AdsbAircraft | null, x: number, y: number) => void
-  onCameraUpdate?: (s: CameraState) => void
-  onCursorMove?: (coord: { lon: number; lat: number } | null) => void
-  onFlightClick?: (icao24: string) => void
-}) {
-  const controlsRef = useRef<MapControlsImpl>(null)
-  const wheelPan = PAN_MODE === 'wheel'
-
-  return (
-    <>
-      {/* Filled country areas */}
-      <Countries features={features} getColor={getColor} />
-
-      {/* Country outlines */}
-      <CountryOutlines features={features} />
-
-      {/* Country labels */}
-      <CountryLabels features={features} />
-
-      {/* Selected flight route line (departure → destination) */}
-      <SelectedFlightRoute />
-
-      {/* Live flight markers */}
-      <FlightMarkers
-        aircraft={aircraft}
-        onHover={onHover}
-        onClick={onFlightClick}
-      />
-
-      <MapControls
-        ref={controlsRef}
-        enableRotate={false}
-        enableZoom={!wheelPan}
-        dampingFactor={0.5}
-        zoomSpeed={0.9}
-        zoomToCursor
-        screenSpacePanning
-        enablePan
-        mouseButtons={{
-          LEFT: THREE.MOUSE.PAN,
-          MIDDLE: THREE.MOUSE.DOLLY,
-          RIGHT: THREE.MOUSE.PAN,
-        }}
-      />
-      {wheelPan && <WheelPan controlsRef={controlsRef} />}
-      <CameraConstraints controlsRef={controlsRef} />
-      {onCameraUpdate && <CameraInfo onUpdate={onCameraUpdate} />}
-      {onCursorMove && <CursorTracker onCursorMove={onCursorMove} />}
-    </>
-  )
+function getMarkerBorderColor(
+  aircraft: AdsbAircraft,
+  selectedIcao24: string | null,
+  hoveredIcao24: string | null,
+) {
+  const icao24 = aircraft.hex.toLowerCase()
+  if (icao24 === selectedIcao24) {
+    return colorToRgba(WORLD_MAP_COLORS.route, 255)
+  }
+  if (icao24 === hoveredIcao24) {
+    return colorToRgba(WORLD_MAP_COLORS.label, 255)
+  }
+  return colorToRgba('#0a0a0a', 255)
 }
 
-const MemoWorldScene = memo(WorldScene)
+function getMarkerSize(
+  aircraft: AdsbAircraft,
+  selectedIcao24: string | null,
+  hoveredIcao24: string | null,
+) {
+  const icao24 = aircraft.hex.toLowerCase()
+  if (icao24 === selectedIcao24) return MARKER_SIZE_PX + 5
+  if (icao24 === hoveredIcao24) return MARKER_SIZE_PX + 3
+  return MARKER_SIZE_PX
+}
 
-const WorldCanvas = memo(function WorldCanvas({
-  aircraft,
-  features,
-  getColor,
-  onHover,
-  onCameraUpdate,
-  onCursorMove,
-  onFlightClick,
-  onPointerMissed,
-}: {
-  aircraft: AdsbAircraft[]
-  features: Feature[]
-  getColor?: GetColorFn
-  onHover?: (aircraft: AdsbAircraft | null, x: number, y: number) => void
-  onCameraUpdate?: (s: CameraState) => void
-  onCursorMove?: (coord: { lon: number; lat: number } | null) => void
-  onFlightClick?: (icao24: string) => void
-  onPointerMissed?: () => void
-}) {
-  return (
-    <div className="fixed inset-0 z-0">
-      <Canvas
-        orthographic
-        camera={{ position: [0, 0, 100], zoom: 16 }}
-        dpr={[1, 1.5]}
-        gl={{ antialias: true, powerPreference: 'high-performance' }}
-        style={{ background: WORLD_MAP_COLORS.background }}
-        onPointerMissed={onPointerMissed}
-      >
-        <MemoWorldScene
-          aircraft={aircraft}
-          features={features}
-          getColor={getColor}
-          onHover={onHover}
-          onCameraUpdate={onCameraUpdate}
-          onCursorMove={onCursorMove}
-          onFlightClick={onFlightClick}
-        />
-      </Canvas>
-    </div>
-  )
-})
+function greatCirclePoint(
+  lon1: number,
+  lat1: number,
+  lon2: number,
+  lat2: number,
+  t: number,
+): [number, number] {
+  const toRad = Math.PI / 180
+  const phi1 = (90 - lat1) * toRad
+  const theta1 = lon1 * toRad
+  const phi2 = (90 - lat2) * toRad
+  const theta2 = lon2 * toRad
+
+  const x1 = Math.sin(phi1) * Math.cos(theta1)
+  const y1 = Math.sin(phi1) * Math.sin(theta1)
+  const z1 = Math.cos(phi1)
+
+  const x2 = Math.sin(phi2) * Math.cos(theta2)
+  const y2 = Math.sin(phi2) * Math.sin(theta2)
+  const z2 = Math.cos(phi2)
+
+  const dot = clamp(x1 * x2 + y1 * y2 + z1 * z2, -1, 1)
+
+  let wx: number
+  let wy: number
+  let wz: number
+
+  if (dot > 0.9995) {
+    wx = x1 + t * (x2 - x1)
+    wy = y1 + t * (y2 - y1)
+    wz = z1 + t * (z2 - z1)
+  } else {
+    const omega = Math.acos(dot)
+    const sinOmega = Math.sin(omega)
+    const a = Math.sin((1 - t) * omega) / sinOmega
+    const b = Math.sin(t * omega) / sinOmega
+    wx = a * x1 + b * x2
+    wy = a * y1 + b * y2
+    wz = a * z1 + b * z2
+  }
+
+  const len = Math.sqrt(wx * wx + wy * wy + wz * wz)
+  const nx = wx / len
+  const ny = wy / len
+  const nz = wz / len
+
+  return [
+    (Math.atan2(ny, nx) * 180) / Math.PI,
+    90 - (Math.acos(nz) * 180) / Math.PI,
+  ]
+}
+
+function buildRouteSegments(
+  lon1: number,
+  lat1: number,
+  lon2: number,
+  lat2: number,
+): RouteSegment[] {
+  const points: [number, number][] = []
+
+  for (let i = 0; i <= 64; i++) {
+    points.push(greatCirclePoint(lon1, lat1, lon2, lat2, i / 64))
+  }
+
+  const segments: RouteSegment[] = []
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const start = points[i]
+    const end = points[i + 1]
+    if (Math.abs(end[0] - start[0]) > 180) continue
+    segments.push({ path: [start, end] })
+  }
+
+  return segments
+}
 
 function isSameCameraState(a: CameraState, b: CameraState) {
   return (
@@ -350,97 +268,325 @@ function isSameCameraState(a: CameraState, b: CameraState) {
   )
 }
 
-function isSameCursorCoord(
-  a: { lon: number; lat: number } | null,
-  b: { lon: number; lat: number } | null,
-) {
-  if (a === b) return true
-  if (!a || !b) return false
-  return a.lon === b.lon && a.lat === b.lat
+function getCameraState(map: MapRef | null, zoom: number): CameraState | null {
+  if (!map) return null
+  const bounds = map.getBounds()
+  if (!bounds) return null
+
+  return {
+    lon: [bounds.getWest(), bounds.getEast()],
+    lat: [bounds.getSouth(), bounds.getNorth()],
+    zoom: 2 ** zoom,
+  }
+}
+
+function applyMapStyleOverrides(map: MapLibreMap) {
+  const style = map.getStyle()
+  const layerIds = new Set(style.layers?.map((layer) => layer.id) ?? [])
+
+  for (const [layerId, prop, value] of FILL_OVERRIDES) {
+    if (!layerIds.has(layerId)) continue
+    map.setPaintProperty(layerId, prop, value)
+  }
+
+  for (const [layerId, textColor, haloColor, haloWidth] of LABEL_OVERRIDES) {
+    if (!layerIds.has(layerId)) continue
+    map.setPaintProperty(layerId, 'text-color', textColor)
+    map.setPaintProperty(layerId, 'text-halo-color', haloColor)
+    map.setPaintProperty(layerId, 'text-halo-width', haloWidth)
+  }
 }
 
 export default function WorldMap({
   dataSource,
-  getColor,
 }: {
   dataSource?: WorldMapDataSource
-  getColor?: GetColorFn
 }) {
-  const { aircraft, features } = useWorldMapData(dataSource)
+  'use no memo'
+
+  const { aircraft } = useWorldMapData(dataSource)
+  const [isClient, setIsClient] = useState(false)
   const [tooltip, setTooltip] = useState<TooltipData | null>(null)
-  const [cursorCoord, setCursorCoord] = useState<{
-    lon: number
-    lat: number
-  } | null>(null)
+  const [cursorCoord, setCursorCoord] = useState<CursorCoord>(null)
+  const [hoveredIcao24, setHoveredIcao24] = useState<string | null>(null)
   const [cameraState, setCameraState] = useState<CameraState>({
     lon: [0, 0],
     lat: [0, 0],
-    zoom: 16,
+    zoom: 2 ** INITIAL_VIEW_STATE.zoom,
   })
+  const [viewState, setViewState] = useState(INITIAL_VIEW_STATE)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mapRef = useRef<MapRef | null>(null)
   const cameraStateRef = useRef(cameraState)
-  const cursorCoordRef = useRef(cursorCoord)
   const setSelectedIcao24 = useSelectedFlightStore(
     (state) => state.setSelectedIcao24,
   )
+  const selectedIcao24 = useSelectedFlightStore((state) => state.selectedIcao24)
+  const aerodataFlight = useSelectedFlightStore((state) => state.aerodataFlight)
 
-  const handleHover = useCallback(
-    (nextAircraft: AdsbAircraft | null, x: number, y: number) => {
-      if (hideTimerRef.current) {
-        clearTimeout(hideTimerRef.current)
-        hideTimerRef.current = null
-      }
-      if (nextAircraft) {
-        setTooltip({ aircraft: nextAircraft, x, y })
-      } else {
-        hideTimerRef.current = setTimeout(() => setTooltip(null), 120)
-      }
-    },
-    [],
-  )
+  useEffect(() => {
+    setIsClient(true)
+  }, [])
 
-  const handleCameraUpdate = useCallback((s: CameraState) => {
-    if (isSameCameraState(cameraStateRef.current, s)) return
-    cameraStateRef.current = s
+  const syncCameraState = useCallback((zoom: number) => {
+    const nextCameraState = getCameraState(mapRef.current, zoom)
+    if (!nextCameraState) return
+    if (isSameCameraState(cameraStateRef.current, nextCameraState)) return
+    cameraStateRef.current = nextCameraState
     startTransition(() => {
-      setCameraState(s)
+      setCameraState(nextCameraState)
     })
   }, [])
 
-  const handleCursorMove = useCallback(
-    (coord: { lon: number; lat: number } | null) => {
-      if (isSameCursorCoord(cursorCoordRef.current, coord)) return
-      cursorCoordRef.current = coord
-      startTransition(() => {
-        setCursorCoord(coord)
+  const handleMapLoad = useCallback(() => {
+    const map = mapRef.current?.getMap()
+    if (!map) return
+    applyMapStyleOverrides(map)
+    syncCameraState(viewState.zoom)
+  }, [syncCameraState, viewState.zoom])
+
+  const handleStyleData = useCallback(() => {
+    const map = mapRef.current?.getMap()
+    if (!map || !map.isStyleLoaded()) return
+    applyMapStyleOverrides(map)
+  }, [])
+
+  const routeSegments = useMemo<RouteSegment[]>(() => {
+    const departure = aerodataFlight?.departure?.airport?.location
+    const arrival = aerodataFlight?.arrival?.airport?.location
+    if (!departure || !arrival) return []
+    return buildRouteSegments(
+      departure.lon,
+      departure.lat,
+      arrival.lon,
+      arrival.lat,
+    )
+  }, [aerodataFlight])
+
+  const selectedAircraft = useMemo(
+    () =>
+      selectedIcao24
+        ? aircraft.find((item) => item.hex.toLowerCase() === selectedIcao24) ??
+          null
+        : null,
+    [aircraft, selectedIcao24],
+  )
+
+  const unselectedAircraft = useMemo(
+    () =>
+      selectedIcao24
+        ? aircraft.filter((item) => item.hex.toLowerCase() !== selectedIcao24)
+        : aircraft,
+    [aircraft, selectedIcao24],
+  )
+
+  const handleHover = useCallback((info: PickingInfo<AdsbAircraft>) => {
+    const aircraftObject = info.object ?? null
+    const nextHoveredIcao24 = aircraftObject?.hex.toLowerCase() ?? null
+
+    setHoveredIcao24((current) =>
+      current === nextHoveredIcao24 ? current : nextHoveredIcao24,
+    )
+    document.body.style.cursor = aircraftObject ? 'pointer' : ''
+
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current)
+      hideTimerRef.current = null
+    }
+
+    if (aircraftObject && Number.isFinite(info.x) && Number.isFinite(info.y)) {
+      setTooltip({
+        aircraft: aircraftObject,
+        x: info.x as number,
+        y: info.y as number,
       })
-    },
-    [],
-  )
+      return
+    }
 
-  const handleFlightClick = useCallback(
-    (icao24: string) => {
-      setSelectedIcao24(icao24)
-    },
-    [setSelectedIcao24],
-  )
+    hideTimerRef.current = setTimeout(() => setTooltip(null), 120)
+  }, [])
 
-  const handlePointerMissed = useCallback(() => {
-    setSelectedIcao24(null)
-  }, [setSelectedIcao24])
+  const layers = useMemo(() => {
+    return [
+      new PathLayer<RouteSegment>({
+        id: 'selected-flight-route',
+        data: routeSegments,
+        pickable: false,
+        widthUnits: 'pixels',
+        widthMinPixels: 2,
+        getWidth: 2,
+        getColor: colorToRgba(WORLD_MAP_COLORS.route, 255),
+        getPath: (segment) => segment.path,
+      }),
+      new IconLayer<AdsbAircraft>({
+        id: 'flight-marker-borders',
+        data: unselectedAircraft,
+        pickable: false,
+        iconAtlas: PLANE_BORDER_ICON_ATLAS,
+        iconMapping: PLANE_ICON_MAPPING,
+        getIcon: () => 'plane',
+        getPosition: (item) => [item.lon, item.lat],
+        getAngle: (item) => item.track - ANGLE_OFFSET,
+        getColor: (item) =>
+          getMarkerBorderColor(item, selectedIcao24, hoveredIcao24),
+        getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
+        sizeUnits: 'pixels',
+        sizeMinPixels: MARKER_MIN_SIZE_PX,
+        sizeMaxPixels: MARKER_MAX_SIZE_PX,
+        alphaCutoff: 0.05,
+        updateTriggers: {
+          getColor: [selectedIcao24, hoveredIcao24],
+          getSize: [selectedIcao24, hoveredIcao24],
+        },
+      }),
+      new IconLayer<AdsbAircraft>({
+        id: 'flight-markers',
+        data: unselectedAircraft,
+        pickable: true,
+        autoHighlight: false,
+        iconAtlas: PLANE_ICON_ATLAS,
+        iconMapping: PLANE_ICON_MAPPING,
+        getIcon: () => 'plane',
+        getPosition: (item) => [item.lon, item.lat],
+        getAngle: (item) => item.track - ANGLE_OFFSET,
+        getColor: (item) => getMarkerColor(item, selectedIcao24, hoveredIcao24),
+        getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
+        sizeUnits: 'pixels',
+        sizeMinPixels: MARKER_MIN_SIZE_PX,
+        sizeMaxPixels: MARKER_MAX_SIZE_PX,
+        alphaCutoff: 0.05,
+        updateTriggers: {
+          getColor: [selectedIcao24, hoveredIcao24],
+          getSize: [selectedIcao24, hoveredIcao24],
+        },
+        onHover: handleHover,
+        onClick: (info) => {
+          const aircraftObject = info.object
+          if (!aircraftObject) {
+            setSelectedIcao24(null)
+            return
+          }
+          setSelectedIcao24(aircraftObject.hex.toLowerCase())
+        },
+      }),
+      new IconLayer<AdsbAircraft>({
+        id: 'selected-flight-marker-border',
+        data: selectedAircraft ? [selectedAircraft] : [],
+        pickable: false,
+        iconAtlas: PLANE_BORDER_ICON_ATLAS,
+        iconMapping: PLANE_ICON_MAPPING,
+        getIcon: () => 'plane',
+        getPosition: (item) => [item.lon, item.lat],
+        getAngle: (item) => item.track - ANGLE_OFFSET,
+        getColor: (item) =>
+          getMarkerBorderColor(item, selectedIcao24, hoveredIcao24),
+        getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
+        sizeUnits: 'pixels',
+        sizeMinPixels: MARKER_MIN_SIZE_PX,
+        sizeMaxPixels: MARKER_MAX_SIZE_PX,
+        alphaCutoff: 0.05,
+        updateTriggers: {
+          getColor: [selectedIcao24, hoveredIcao24],
+          getSize: [selectedIcao24, hoveredIcao24],
+        },
+      }),
+      new IconLayer<AdsbAircraft>({
+        id: 'selected-flight-marker',
+        data: selectedAircraft ? [selectedAircraft] : [],
+        pickable: true,
+        autoHighlight: false,
+        iconAtlas: PLANE_ICON_ATLAS,
+        iconMapping: PLANE_ICON_MAPPING,
+        getIcon: () => 'plane',
+        getPosition: (item) => [item.lon, item.lat],
+        getAngle: (item) => item.track - ANGLE_OFFSET,
+        getColor: (item) => getMarkerColor(item, selectedIcao24, hoveredIcao24),
+        getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
+        sizeUnits: 'pixels',
+        sizeMinPixels: MARKER_MIN_SIZE_PX,
+        sizeMaxPixels: MARKER_MAX_SIZE_PX,
+        alphaCutoff: 0.05,
+        updateTriggers: {
+          getColor: [selectedIcao24, hoveredIcao24],
+          getSize: [selectedIcao24, hoveredIcao24],
+        },
+        onHover: handleHover,
+        onClick: (info) => {
+          const aircraftObject = info.object
+          if (!aircraftObject) return
+          setSelectedIcao24(aircraftObject.hex.toLowerCase())
+        },
+      }),
+    ]
+  }, [
+    handleHover,
+    hoveredIcao24,
+    routeSegments,
+    selectedAircraft,
+    selectedIcao24,
+    setSelectedIcao24,
+    unselectedAircraft,
+  ])
+
+  useEffect(() => {
+    return () => {
+      document.body.style.cursor = ''
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
+    }
+  }, [])
+
+  if (!isClient) {
+    return (
+      <>
+        <div
+          className="fixed inset-0 z-0"
+          style={{ background: WORLD_MAP_COLORS.background }}
+        />
+        <SelectedFlightSheet />
+      </>
+    )
+  }
 
   return (
     <>
-      <WorldCanvas
-        aircraft={aircraft}
-        features={features}
-        getColor={getColor}
-        onHover={handleHover}
-        onCameraUpdate={handleCameraUpdate}
-        onCursorMove={handleCursorMove}
-        onFlightClick={handleFlightClick}
-        onPointerMissed={handlePointerMissed}
-      />
+      <div
+        className="fixed inset-0 z-0"
+        style={{ background: WORLD_MAP_COLORS.background }}
+      >
+        <Map
+          ref={mapRef}
+          reuseMaps
+          mapLib={maplibregl}
+          mapStyle={MAP_STYLE}
+          initialViewState={INITIAL_VIEW_STATE}
+          longitude={viewState.longitude}
+          latitude={viewState.latitude}
+          zoom={viewState.zoom}
+          bearing={viewState.bearing}
+          pitch={viewState.pitch}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
+          dragRotate={false}
+          touchPitch={false}
+          attributionControl={false}
+          style={{ width: '100%', height: '100%' }}
+          onLoad={handleMapLoad}
+          onStyleData={handleStyleData}
+          onMove={(event: ViewStateChangeEvent) => {
+            setViewState(event.viewState)
+            syncCameraState(event.viewState.zoom)
+          }}
+          onMouseMove={(event) => {
+            setCursorCoord({
+              lon: event.lngLat.lng,
+              lat: event.lngLat.lat,
+            })
+          }}
+          onMouseLeave={() => setCursorCoord(null)}
+        >
+          <DeckGLOverlay layers={layers} interleaved />
+        </Map>
+      </div>
       {tooltip && (
         <FlightTooltip
           {...tooltip}
@@ -456,7 +602,6 @@ export default function WorldMap({
         />
       )}
       <MapLegend {...cameraState} cursor={cursorCoord} />
-
       <SelectedFlightSheet />
     </>
   )
