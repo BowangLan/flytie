@@ -17,7 +17,6 @@ import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre'
 import {
   getTracesIndexAction,
   getTracesAction,
-  getTracesByDateAction,
 } from '#/actions/adsbexchange/traces'
 import type { Trace } from '#/actions/adsbexchange/traces'
 import { useReplayTimelineStore } from '#/store/replay-timeline-store'
@@ -64,7 +63,9 @@ import { FlightSearchDialog } from './flight-search-dialog'
 import { WorldMapToolbar } from './world-map-toolbar'
 import { jsonObjSize, roughObjectSize } from '#/lib/utils'
 
-const REPLAY_FETCH_CHUNK_SIZE = 100
+const REPLAY_MAX_TRACES_PER_DAY = 2000
+const REPLAY_BATCH_SIZE = 50
+const REPLAY_CONCURRENT_REQUESTS = 4
 
 function chunkIcaos(icaos: readonly string[], size: number) {
   const chunks: string[][] = []
@@ -134,8 +135,14 @@ export default function WorldMap({
     (state) => state.currentTimestamp,
   )
   const setReplayLoading = useReplayTimelineStore((state) => state.setLoading)
+  const setReplayLoadingProgress = useReplayTimelineStore(
+    (state) => state.setLoadingProgress,
+  )
   const setReplayLoadedRange = useReplayTimelineStore(
     (state) => state.setLoadedRange,
+  )
+  const setReplayTraceCount = useReplayTimelineStore(
+    (state) => state.setTraceCount,
   )
 
   const { data: weatherTileUrl } = useWeatherRadar(isClient, WEATHER_TILE_SIZE)
@@ -280,7 +287,7 @@ export default function WorldMap({
 
       try {
         if (cancelled) return
-        const traces = await getTracesByDateAction({
+        const icaoList = await getTracesIndexAction({
           data: {
             day: replayDate.day,
             month: replayDate.month,
@@ -288,27 +295,61 @@ export default function WorldMap({
           },
         })
 
+        const max = Math.min(icaoList.length, REPLAY_MAX_TRACES_PER_DAY)
+        const traces: Trace[] = []
+
+        setReplayLoadingProgress({ loaded: 0, total: max })
+
+        for (let i = 0; i < max; i += REPLAY_BATCH_SIZE * REPLAY_CONCURRENT_REQUESTS) {
+          if (cancelled) return
+          console.log(`[Replay] Loading traces ${i} of ${max}`)
+          const batchPromises = Array.from({ length: REPLAY_CONCURRENT_REQUESTS }, (_, j) => {
+            const start = i + j * REPLAY_BATCH_SIZE
+            const batch = icaoList.slice(start, start + REPLAY_BATCH_SIZE)
+            return batch.length
+              ? getTracesAction({
+                data: {
+                  icao24: batch,
+                  day: replayDate.day,
+                  month: replayDate.month,
+                  year: replayDate.year,
+                },
+              })
+              : Promise.resolve([])
+          })
+          const results = await Promise.all(batchPromises)
+          traces.push(...results.flat())
+          const loaded = Math.min(
+            i + REPLAY_BATCH_SIZE * REPLAY_CONCURRENT_REQUESTS,
+            max,
+          )
+          setReplayLoadingProgress({ loaded, total: max })
+        }
+
         console.log(`[Replay] Loaded ${traces.length} icaos for ${replayDate.day}/${replayDate.month}/${replayDate.year}`)
 
         // log total data size in MB
-        const totalSize = roughObjectSize(traces)
-        console.log(`[Replay] Total data size: ${totalSize / 1024 / 1024} MB`)
-        // log total data size in string length
-        const totalStringLength = JSON.stringify(traces).length
-        console.log(`[Replay] Total string length: ${totalStringLength} characters`)
-        // log total string length in bytes calculated from the string length
-        const jsonSize = jsonObjSize(traces)
-        console.log(`[Replay] Total string length in bytes: ${jsonSize} bytes (${jsonSize / 1024 / 1024} MB)`)
+        // const totalSize = roughObjectSize(traces)
+        // console.log(`[Replay] Total data size: ${totalSize / 1024 / 1024} MB`)
+        // // log total data size in string length
+        // const totalStringLength = JSON.stringify(traces).length
+        // console.log(`[Replay] Total string length: ${totalStringLength} characters`)
+        // // log total string length in bytes calculated from the string length
+        // const jsonSize = jsonObjSize(traces)
+        // console.log(`[Replay] Total string length in bytes: ${jsonSize} bytes (${jsonSize / 1024 / 1024} MB)`)
 
         replayRef.current.setTraces(traces)
-        setReplayIcaos(replayRef.current.getIcaos())
+        const icaos = replayRef.current.getIcaos()
+        setReplayIcaos(icaos)
         setReplayLoadedRange(replayRef.current.getLoadedRange())
+        setReplayTraceCount(icaos.length)
         setReplayLoading(false)
       } catch (error) {
         if (cancelled) return
         replayRef.current.clear()
         setReplayIcaos([])
         setReplayLoadedRange(null)
+        setReplayTraceCount(0)
         setReplayLoading(false)
         console.error('[Replay] Failed to load replay traces', error)
       }
@@ -326,6 +367,8 @@ export default function WorldMap({
     replayDate.year,
     setReplayLoadedRange,
     setReplayLoading,
+    setReplayLoadingProgress,
+    setReplayTraceCount,
   ])
 
   useEffect(() => {

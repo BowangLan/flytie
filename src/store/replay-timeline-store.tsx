@@ -34,8 +34,14 @@ type ReplayTimelineState = {
   loading: boolean
   setLoading: (loading: boolean) => void
 
+  loadingProgress: { loaded: number; total: number } | null
+  setLoadingProgress: (progress: { loaded: number; total: number } | null) => void
+
   loadedRange: [number, number] | null
   setLoadedRange: (range: [number, number] | null) => void
+
+  traceCount: number
+  setTraceCount: (count: number) => void
 
   timeWindow: ReplayTimeWindow
   setTimeWindowEnabled: (enabled: boolean) => void
@@ -131,7 +137,14 @@ export const useReplayTimelineStore = create<ReplayTimelineState>()((set) => ({
     }),
 
   loading: false,
-  setLoading: (loading) => set({ loading }),
+  setLoading: (loading) =>
+    set(() => ({
+      loading,
+      ...(loading ? {} : { loadingProgress: null }),
+    })),
+
+  loadingProgress: null,
+  setLoadingProgress: (loadingProgress) => set({ loadingProgress }),
 
   loadedRange: null,
   setLoadedRange: (loadedRange) =>
@@ -151,6 +164,9 @@ export const useReplayTimelineStore = create<ReplayTimelineState>()((set) => ({
         loadedRange,
       }
     }),
+
+  traceCount: 0,
+  setTraceCount: (traceCount) => set({ traceCount }),
 
   timeWindow: INITIAL_TIME_WINDOW,
   setTimeWindowEnabled: (enabled) =>

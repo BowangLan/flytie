@@ -105,7 +105,11 @@ export function ReplayTimeline() {
   const playbackSpeed = useReplayTimelineStore((state) => state.playbackSpeed)
   const replayDate = useReplayTimelineStore((state) => state.date)
   const loadedRange = useReplayTimelineStore((state) => state.loadedRange)
+  const traceCount = useReplayTimelineStore((state) => state.traceCount)
   const loading = useReplayTimelineStore((state) => state.loading)
+  const loadingProgress = useReplayTimelineStore(
+    (state) => state.loadingProgress,
+  )
   const timeWindow = useReplayTimelineStore((state) => state.timeWindow)
   const setDate = useReplayTimelineStore((state) => state.setDate)
   const setIsPlaying = useReplayTimelineStore((state) => state.setIsPlaying)
@@ -284,17 +288,36 @@ export function ReplayTimeline() {
                       Building replay timeline
                     </div>
                     <p className="mt-1 text-sm text-cyan-50/75">
-                      Fetching traces for {formatDateValue(replayDate)}
-                      {timeWindow.enabled
-                        ? ` between ${timeWindow.startTime} and ${timeWindow.endTime}.`
-                        : '.'}
+                      {loadingProgress && loadingProgress.total > 0
+                        ? `Loading traces ${loadingProgress.loaded.toLocaleString()} of ${loadingProgress.total.toLocaleString()} for ${formatDateValue(replayDate)}.`
+                        : `Fetching traces for ${formatDateValue(replayDate)}${timeWindow.enabled ? ` between ${timeWindow.startTime} and ${timeWindow.endTime}.` : '.'}`}
                     </p>
                     <div className="mt-3">
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="h-10 rounded-xl bg-white/6 motion-safe:animate-pulse" />
-                        <div className="h-10 rounded-xl bg-white/6 motion-safe:animate-pulse [animation-delay:120ms]" />
-                        <div className="h-10 rounded-xl bg-white/6 motion-safe:animate-pulse [animation-delay:240ms]" />
-                      </div>
+                      {loadingProgress && loadingProgress.total > 0 ? (
+                        <div className="space-y-2">
+                          <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                            <div
+                              className="h-full rounded-full bg-cyan-400/80 transition-[width] duration-300 ease-out"
+                              style={{
+                                width: `${(loadingProgress.loaded / loadingProgress.total) * 100}%`,
+                              }}
+                            />
+                          </div>
+                          <p className="text-right text-xs text-cyan-50/60">
+                            {Math.round(
+                              (loadingProgress.loaded / loadingProgress.total) *
+                                100,
+                            )}
+                            %
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="h-10 rounded-xl bg-white/6 motion-safe:animate-pulse" />
+                          <div className="h-10 rounded-xl bg-white/6 motion-safe:animate-pulse [animation-delay:120ms]" />
+                          <div className="h-10 rounded-xl bg-white/6 motion-safe:animate-pulse [animation-delay:240ms]" />
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -409,6 +432,11 @@ export function ReplayTimeline() {
                     <span className='font-mono text-sm'>
                       {secondaryStatusLabel}
                     </span>
+                    {hasLoadedData && (
+                      <span className='text-xs text-neutral-500'>
+                        {traceCount.toLocaleString()} trace{traceCount !== 1 ? 's' : ''} shown
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="space-y-3">
@@ -464,11 +492,11 @@ export function ReplayTimeline() {
                   )}
                 >
                   <div
-                    className="absolute inset-y-0 left-0 rounded-full bg-[linear-gradient(90deg,rgba(34,211,238,0.4),rgba(255,255,255,0.12))]"
+                    className="absolute inset-y-0 left-0 rounded-l-full bg-linear-to-r from-cyan-600/80 to-cyan-500/80"
                     style={{ width: `${percent}%` }}
                   />
                   <div
-                    className="absolute top-1/2 -translate-y-1/2 w-0.5 h-5 -ml-px rounded-full bg-white shadow-sm"
+                    className="absolute top-1/2 -translate-y-1/2 w-1 hover:scale-105 transition-transform duration-100 ease-out h-5 -ml-px rounded-full bg-white shadow-sm"
                     style={{ left: `${percent}%` }}
                   />
                 </div>

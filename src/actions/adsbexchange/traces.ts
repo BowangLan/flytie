@@ -1,6 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import z from 'zod'
-import { getOrSet } from '#/lib/cache'
+import { getOrSetMany } from '#/lib/cache'
 
 const BASE_URL = 'https://samples.adsbexchange.com'
 
@@ -105,18 +105,6 @@ async function fetchTraces(
   }
 }
 
-async function getTraces(
-  icao24: string,
-  year: number,
-  month: number,
-  day: number,
-) {
-  return getOrSet(
-    traceCacheKey(icao24, year, month, day),
-    () => fetchTraces(icao24, year, month, day),
-  )
-}
-
 export const getTracesAction = createServerFn()
   .inputValidator(
     z.object({
@@ -127,11 +115,13 @@ export const getTracesAction = createServerFn()
     }),
   )
   .handler(async ({ data }) => {
-    const traces = await Promise.all(
-      data.icao24.map((icao24) =>
-        getTraces(icao24, data.year, data.month, data.day),
-      ),
+    const traces = await getOrSetMany(
+      data.icao24.map((icao24) => ({
+        key: traceCacheKey(icao24, data.year, data.month, data.day),
+        fetcher: () => fetchTraces(icao24, data.year, data.month, data.day),
+      })),
     )
+    console.log(`[getTracesAction] Loaded ${traces.length} traces`)
     return traces
   })
 
@@ -145,32 +135,6 @@ export const getTracesIndexAction = createServerFn()
   )
   .handler(async ({ data }) => {
     const index = await getTraceIndex(data.year, data.month, data.day)
+    console.log(`[getTracesIndexAction] Loaded ${index.traces.length} traces`)
     return index.traces
-  })
-
-const MAX_TRACES_PER_DAY = 800
-
-export const getTracesByDateAction = createServerFn()
-  .inputValidator(
-    z.object({
-      year: z.number(),
-      month: z.number(),
-      day: z.number(),
-    }),
-  )
-  .handler(async ({ data }) => {
-    const index = await getTraceIndex(data.year, data.month, data.day)
-    const traces: Trace[] = []
-    const max = Math.min(index.traces.length, MAX_TRACES_PER_DAY)
-    const BATCH_SIZE = 25
-    for (let i = 0; i < max; i += BATCH_SIZE) {
-      // log current batch & progress
-      console.log(`[Replay] Loading traces ${i} of ${max}`)
-      const batch = index.traces.slice(i, i + BATCH_SIZE)
-      const batchTraces = await Promise.all(
-        batch.map(icao24 => getTraces(icao24, data.year, data.month, data.day))
-      )
-      traces.push(...batchTraces)
-    }
-    return traces
   })

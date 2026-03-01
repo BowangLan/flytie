@@ -31,3 +31,53 @@ export async function getOrSet<T>(
 
   return value
 }
+
+/**
+ * Get multiple values from cache or compute and store them.
+ * Uses MGET for a single Redis round-trip. Cache is best-effort.
+ */
+export async function getOrSetMany<T>(
+  entries: Array<{ key: string; fetcher: () => Promise<T> }>,
+  ttlSeconds = DEFAULT_TTL_SECONDS,
+): Promise<T[]> {
+  if (entries.length === 0) return []
+
+  const keys = entries.map((e) => e.key)
+  const rawValues = await withRedis(async (client) => {
+    return client.mGet(keys)
+  })
+
+  const results: (T | null)[] = new Array(entries.length)
+  const misses: Array<{ index: number; fetcher: () => Promise<T> }> = []
+
+  for (let i = 0; i < entries.length; i++) {
+    const raw = rawValues?.[i]
+    if (raw != null) {
+      try {
+        results[i] = JSON.parse(raw) as T
+      } catch {
+        misses.push({ index: i, fetcher: entries[i].fetcher })
+      }
+    } else {
+      misses.push({ index: i, fetcher: entries[i].fetcher })
+    }
+  }
+
+  if (misses.length === 0) return results as T[]
+
+  const fetched = await Promise.all(misses.map((m) => m.fetcher()))
+  for (let j = 0; j < misses.length; j++) {
+    results[misses[j].index] = fetched[j]
+  }
+
+  await withRedis(async (client) => {
+    const pipeline = client.multi()
+    for (let j = 0; j < misses.length; j++) {
+      const idx = misses[j].index
+      pipeline.set(keys[idx], JSON.stringify(fetched[j]), { EX: ttlSeconds })
+    }
+    await pipeline.exec()
+  })
+
+  return results as T[]
+}
