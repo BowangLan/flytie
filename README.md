@@ -75,14 +75,7 @@ The current codebase expects:
 ```bash
 VITE_CONVEX_URL=...
 CONVEX_DEPLOYMENT=...
-```
-
-Optional:
-
-```bash
 REDIS_URL=...
-OPENSKY_CLIENT_ID=...
-OPENSKY_CLIENT_SECRET=...
 ```
 
 Notes:
@@ -90,7 +83,6 @@ Notes:
 - `VITE_CONVEX_URL` is required by the Convex React provider.
 - `CONVEX_DEPLOYMENT` is typically set by `convex init` / `convex dev`.
 - `REDIS_URL` enables caching for replay trace fetching. Without it, replay still works but falls back to uncached fetches.
-- OpenSky credentials are only relevant for older OpenSky-related code paths still present in `convex/`.
 
 Initialize Convex if needed:
 

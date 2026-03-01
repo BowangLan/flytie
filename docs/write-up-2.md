@@ -142,6 +142,7 @@ I'm using `Traces Files` from ADS-B Exchange.s historical API. Limitations of th
 
 - only provide sample data, specifically the first day of every month since ~2016 for free. 
 - Needs to fetch data for each icao & day in a separate requeset. One day has ~10,000+ icaos, making fetching these data during request time impossible. 
+- **Currently, the production Redis Instance only cached 2,000 flights for day `2026-02-01`**
 
 To overcome this, I implemented batch fetching on both the frontend (`src/components/world-map/index.tsx:310`) and backend (`src/actions/adsbexchange/traces.ts`), enabling concurrent requests. My initial approach was to fetch all ICAOs in a single request, but I quickly ran into a maximum response size limit at around 800 ICAOs. To work around this, I split the requests—each now fetches data for 50 ICAOs at a time, with up to 4 requests running concurrently via `Promise.all`.
 
