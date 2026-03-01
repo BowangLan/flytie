@@ -111,8 +111,9 @@ export function FlightSearchDialog({
                       key={result.icao24}
                       type="button"
                       onClick={() => {
-                        onSelectIcao24(result.icao24.toLowerCase())
                         setOpen(false)
+                        setQuery('')
+                        onSelectIcao24(result.icao24.toLowerCase())
                       }}
                       className="flex w-full items-start justify-between gap-3 rounded-2xl border border-transparent px-4 py-3 text-left transition hover:border-cyan-300/25 hover:bg-white/6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60"
                     >

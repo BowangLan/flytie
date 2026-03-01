@@ -255,8 +255,11 @@ export const fetchFlightByIcao24 = action({
       throw new Error(
         `AeroDataBox API error: ${res.status}: ${await res.text()}`,
       )
+
+    const text = await res.text()
+    console.log('[fetchFlightByIcao24] response text:', text)
     try {
-      const data = (await res.json()) as AerodataboxFlightByIcao24Response
+      const data = JSON.parse(text) as AerodataboxFlightByIcao24Response
       return data
     } catch (error) {
       console.error('[fetchFlightByIcao24] error parsing response:', error)

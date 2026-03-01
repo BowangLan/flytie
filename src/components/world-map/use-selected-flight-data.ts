@@ -3,6 +3,37 @@ import { useAction } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import { useSelectedFlightStore } from '#/store/selected-flight.store'
 
+function createAbortError() {
+  return new DOMException('The request was aborted.', 'AbortError')
+}
+
+function abortable<T>(promise: Promise<T>, signal: AbortSignal) {
+  if (signal.aborted) {
+    return Promise.reject(createAbortError())
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(createAbortError())
+
+    signal.addEventListener('abort', onAbort, { once: true })
+
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
 /**
  * Fetches Aerodatabox flight data when a flight is selected by ICAO24.
  * Updates aerodataFlight, aerodataLoading, and aerodataError in the selected-flight store.
@@ -22,54 +53,81 @@ export function useSelectedFlightData() {
 
   useEffect(() => {
     if (!selectedIcao24) {
+      setAerodataLoading(false)
       setAerodataFlight(null)
       setAerodataError(null)
       return
     }
+
+    const abortController = new AbortController()
+
     setAerodataLoading(true)
     setAerodataError(null)
     setAerodataFlight(null)
-    fetchFlightByIcao24({ icao24: selectedIcao24 })
+
+    void abortable(
+      fetchFlightByIcao24({ icao24: selectedIcao24 }),
+      abortController.signal,
+    )
       .then((flights) => {
-        // Prefer ongoing/active flights (specific statuses); fallback to first if none found.
-        // const activeFlight = flights?.find(
-        //   (flight) =>
-        //     flight.status === 'Departed' ||
-        //     flight.status === 'EnRoute' ||
-        //     flight.status === 'Approaching' ||
-        //     flight.status === 'Delayed' ||
-        //     flight.status === 'Diverted',
-        // )
-        flights.sort((a, b) => {
-          const aTime = a.departure.revisedTime?.utc ?? a.departure.scheduledTime?.utc
-          const bTime = b.departure.revisedTime?.utc ?? b.departure.scheduledTime?.utc
+        const now = new Date()
+        const sortedFlights = [...flights].sort((a, b) => {
+          const aTime =
+            a.departure.revisedTime?.utc ?? a.departure.scheduledTime?.utc
+          const bTime =
+            b.departure.revisedTime?.utc ?? b.departure.scheduledTime?.utc
           if (!aTime && !bTime) return 0
           if (!aTime) return 1
           if (!bTime) return -1
           return aTime.localeCompare(bTime)
         })
-        const activeFlight = flights.filter((flight) => {
-          if (flight.status === "Arrived") return false
-          // time looks like "2026-02-28 20:55Z"
-          // filter out future flights & past flights
-          const depTime = flight.departure.revisedTime?.utc ?? flight.departure.scheduledTime?.utc
-          const arrTime = flight.arrival.revisedTime?.utc ?? flight.arrival.scheduledTime?.utc
+
+        const activeFlights = sortedFlights.filter((flight) => {
+          if (flight.status === 'Arrived') return false
+
+          const depTime =
+            flight.departure.revisedTime?.utc ??
+            flight.departure.scheduledTime?.utc
+          const arrTime =
+            flight.arrival.revisedTime?.utc ?? flight.arrival.scheduledTime?.utc
           if (!depTime || !arrTime) return false
+
           const depDate = new Date(depTime)
           const arrDate = new Date(arrTime)
-          return depDate < new Date() && arrDate > new Date()
+          return depDate < now && arrDate > now
         })
-        if (activeFlight.length === 0) {
-          console.warn('[useSelectedFlightData] no active flights found', flights)
+
+        if (activeFlights.length === 0) {
+          console.warn(
+            '[useSelectedFlightData] no active flights found',
+            sortedFlights,
+          )
         }
-        const fallbackFlight = flights.find((flight) => flight.status === "Arrived") ?? flights[0] ?? null
-        setAerodataFlight(activeFlight[0] ?? fallbackFlight)
+
+        const fallbackFlight =
+          sortedFlights.find((flight) => flight.status === 'Arrived') ??
+          sortedFlights.at(0) ??
+          null
+
+        if (abortController.signal.aborted) return
+        setAerodataFlight(activeFlights[0] ?? fallbackFlight)
       })
-      .catch((err) => {
-        setAerodataError(err instanceof Error ? err.message : 'Failed to load')
+      .catch((error) => {
+        if (isAbortError(error)) return
+
+        setAerodataError(
+          error instanceof Error ? error.message : 'Failed to load',
+        )
         setAerodataFlight(null)
       })
-      .finally(() => setAerodataLoading(false))
+      .finally(() => {
+        if (abortController.signal.aborted) return
+        setAerodataLoading(false)
+      })
+
+    return () => {
+      abortController.abort()
+    }
   }, [
     selectedIcao24,
     fetchFlightByIcao24,

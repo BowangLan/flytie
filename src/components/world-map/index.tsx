@@ -222,6 +222,18 @@ export default function WorldMap({
     hideTimerRef.current = setTimeout(() => setTooltip(null), 120)
   })
 
+  const selectAndCenterOnAircraft = useCallback((icao24: string) => {
+    setSelectedIcao24(icao24)
+    const selectedFlightAircraft = useFlightsStore.getState().map.get(icao24)
+    if (selectedFlightAircraft) {
+      mapRef.current?.easeTo({
+        center: [selectedFlightAircraft.lon, selectedFlightAircraft.lat],
+        duration: 700,
+        essential: true,
+      })
+    }
+  }, [setSelectedIcao24])
+
   const layers = useMemo(() => {
     if (replayActive) {
       return createReplayMapLayers({
@@ -458,7 +470,7 @@ export default function WorldMap({
       <div className="pointer-events-none fixed top-5 left-5 z-20">
         <FlightSearchDialog
           aircraft={deferredAircraft}
-          onSelectIcao24={setSelectedIcao24}
+          onSelectIcao24={selectAndCenterOnAircraft}
         />
       </div>
       <WorldMapToolbar />
