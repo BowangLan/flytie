@@ -1,214 +1,174 @@
-Welcome to your new TanStack Start app!
+# Flytie
 
-# Getting Started
+Flytie is a flight-tracking web app built around a live world map, fast flight lookup, and historical replay for a selected day.
 
-To run this application:
+The current app combines:
+
+- live-ish aircraft positions from ADS-B Exchange
+- richer selected-flight metadata from AeroDataBox
+- a GPU-rendered map stack with deck.gl + MapLibre
+- replay trace loading with optional Redis caching
+- a TanStack Start + React frontend with Convex-backed actions
+
+This README reflects the current codebase and the implementation notes in [`docs/write-up.md`](/Users/bowanglan/Dev/flytie/docs/write-up.md), [`docs/write-up-2.md`](/Users/bowanglan/Dev/flytie/docs/write-up-2.md), and [`docs/replay-timeline-scrub.md`](/Users/bowanglan/Dev/flytie/docs/replay-timeline-scrub.md).
+
+## Features
+
+- Live global aircraft map
+- Flight hover tooltip and selected-flight detail sheet
+- Flight search dialog with keyboard shortcut support (`Ctrl/Cmd + K`)
+- Route visualization for the selected flight
+- Weather radar tile overlay
+- Replay mode for historical ADS-B Exchange traces
+- Replay timeline with day picker, scrubbing, play/pause, and speed controls
+- Early ARTCC airspace boundary support
+
+## Stack
+
+- Bun
+- TanStack Start
+- React 19
+- TanStack Router
+- TanStack Query
+- Convex
+- Zustand
+- deck.gl
+- MapLibre GL
+- Tailwind CSS v4
+
+## Project Structure
+
+- [`src/routes`](/Users/bowanglan/Dev/flytie/src/routes): app routes
+- [`src/components/world-map`](/Users/bowanglan/Dev/flytie/src/components/world-map): live map, replay, layers, toolbar, tooltip, selected-flight UI
+- [`src/store`](/Users/bowanglan/Dev/flytie/src/store): Zustand stores for flights, selection, and replay timeline state
+- [`src/actions/adsbexchange/traces.ts`](/Users/bowanglan/Dev/flytie/src/actions/adsbexchange/traces.ts): server functions for replay trace loading
+- [`convex`](/Users/bowanglan/Dev/flytie/convex): backend functions and schema
+- [`scripts`](/Users/bowanglan/Dev/flytie/scripts): data prep and ADS-B sample-data exploration scripts
+- [`docs`](/Users/bowanglan/Dev/flytie/docs): implementation notes and replay write-ups
+
+## Local Development
+
+Install dependencies:
 
 ```bash
 bun install
+```
+
+Start the frontend:
+
+```bash
 bun --bun run dev
 ```
 
-# Building For Production
+The dev server runs on `http://localhost:3000`.
 
-To build this application for production:
+If you want the Convex backend running locally as well, start it in a second terminal:
 
 ```bash
+bunx --bun convex dev
+```
+
+## Environment
+
+The current codebase expects:
+
+```bash
+VITE_CONVEX_URL=...
+CONVEX_DEPLOYMENT=...
+```
+
+Optional:
+
+```bash
+REDIS_URL=...
+OPENSKY_CLIENT_ID=...
+OPENSKY_CLIENT_SECRET=...
+```
+
+Notes:
+
+- `VITE_CONVEX_URL` is required by the Convex React provider.
+- `CONVEX_DEPLOYMENT` is typically set by `convex init` / `convex dev`.
+- `REDIS_URL` enables caching for replay trace fetching. Without it, replay still works but falls back to uncached fetches.
+- OpenSky credentials are only relevant for older OpenSky-related code paths still present in `convex/`.
+
+Initialize Convex if needed:
+
+```bash
+bunx --bun convex init
+```
+
+## Scripts
+
+Core app scripts:
+
+```bash
+bun --bun run dev
 bun --bun run build
-```
-
-## Testing
-
-This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
-
-```bash
+bun --bun run preview
 bun --bun run test
-```
-
-## Styling
-
-This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
-
-### Removing Tailwind CSS
-
-If you prefer not to use Tailwind CSS:
-
-1. Remove the demo pages in `src/routes/demo/`
-2. Replace the Tailwind import in `src/styles.css` with your own styles
-3. Remove `tailwindcss()` from the plugins array in `vite.config.ts`
-4. Uninstall the packages: `bun install @tailwindcss/vite tailwindcss -D`
-
-## Linting & Formatting
-
-This project uses [eslint](https://eslint.org/) and [prettier](https://prettier.io/) for linting and formatting. Eslint is configured using [tanstack/eslint-config](https://tanstack.com/config/latest/docs/eslint). The following scripts are available:
-
-```bash
 bun --bun run lint
 bun --bun run format
 bun --bun run check
 ```
 
-## Setting up Convex
-
-- Set the `VITE_CONVEX_URL` and `CONVEX_DEPLOYMENT` environment variables in your `.env.local`. (Or run `bunx --bun convex init` to set them automatically.)
-- Run `bunx --bun convex dev` to start the Convex server.
-
-## Shadcn
-
-Add components using the latest version of [Shadcn](https://ui.shadcn.com/).
+ADS-B exploration / replay scripts:
 
 ```bash
-pnpm dlx shadcn@latest add button
+bun run scripts/test-adsb-traces.ts
+bun run scripts/test-adsb-hires-traces.ts
+bun run scripts/test-adsb-readsb-hist.ts
+bun run scripts/adsb-save-day-traces.ts --year 2026 --month 2 --day 1
 ```
 
-## Routing
+Data-generation scripts:
 
-This project uses [TanStack Router](https://tanstack.com/router) with file-based routing. Routes are managed as files in `src/routes`.
-
-### Adding A Route
-
-To add a new route to your application just add a new file in the `./src/routes` directory.
-
-TanStack will automatically generate the content of the route file for you.
-
-Now that you have two routes you can use a `Link` component to navigate between them.
-
-### Adding Links
-
-To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
-
-```tsx
-import { Link } from '@tanstack/react-router'
+```bash
+bun run scripts/airports-csv-to-jsonl.ts
+node scripts/generate-artcc-geojson.mjs
 ```
 
-Then anywhere in your JSX you can use it like so:
+## Replay Architecture
 
-```tsx
-<Link to="/about">About</Link>
-```
+Replay is not implemented as buffered live state. It uses ADS-B Exchange daily trace files directly.
 
-This will create a link that will navigate to the `/about` route.
+Current replay behavior:
 
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
+- loads the selected day's ICAO index from ADS-B Exchange sample data
+- fetches trace files in batches from the server
+- caches traces when Redis is available
+- stores heavy normalized trace data in a ref-backed replay manager
+- keeps only lightweight replay UI state in Zustand
+- hides live layers while replay is active and renders replay-only markers
 
-### Using A Layout
+Useful references:
 
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you render `{children}` in the `shellComponent`.
+- [`docs/replay-timeline-scrub.md`](/Users/bowanglan/Dev/flytie/docs/replay-timeline-scrub.md)
+- [`src/components/world-map/replay-manager.ts`](/Users/bowanglan/Dev/flytie/src/components/world-map/replay-manager.ts)
+- [`src/components/world-map/replay-timeline.tsx`](/Users/bowanglan/Dev/flytie/src/components/world-map/replay-timeline.tsx)
 
-Here is an example layout that includes a header:
+## Data Sources
 
-```tsx
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
+- ADS-B Exchange
+  - live aircraft state
+  - historical trace replay
+- AeroDataBox
+  - selected-flight metadata such as airports and schedule details
+- OurAirports
+  - airport import data used by local scripts / older Convex data paths
+- NOAA / NWS
+  - ARTCC boundary source used to generate the included GeoJSON
 
-export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'My App' },
-    ],
-  }),
-  shellComponent: ({ children }) => (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        <header>
-          <nav>
-            <Link to="/">Home</Link>
-            <Link to="/about">About</Link>
-          </nav>
-        </header>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  ),
-})
-```
+## Known Constraints
 
-More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
+- Replay payloads are still expensive for busy days.
+- The current replay implementation caps loaded traces per day in the UI.
+- Data from ADS-B Exchange and AeroDataBox can disagree, which can affect route accuracy.
+- Some legacy OpenSky and airport-import code remains in the repo even though the main live map path now uses ADS-B Exchange.
 
-## Server Functions
+## Repo Docs
 
-TanStack Start provides server functions that allow you to write server-side code that seamlessly integrates with your client components.
-
-```tsx
-import { createServerFn } from '@tanstack/react-start'
-
-const getServerTime = createServerFn({
-  method: 'GET',
-}).handler(async () => {
-  return new Date().toISOString()
-})
-
-// Use in a component
-function MyComponent() {
-  const [time, setTime] = useState('')
-
-  useEffect(() => {
-    getServerTime().then(setTime)
-  }, [])
-
-  return <div>Server time: {time}</div>
-}
-```
-
-## API Routes
-
-You can create API routes by using the `server` property in your route definitions:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-import { json } from '@tanstack/react-start'
-
-export const Route = createFileRoute('/api/hello')({
-  server: {
-    handlers: {
-      GET: () => json({ message: 'Hello, World!' }),
-    },
-  },
-})
-```
-
-## Data Fetching
-
-There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
-
-For example:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/people')({
-  loader: async () => {
-    const response = await fetch('https://swapi.dev/api/people')
-    return response.json()
-  },
-  component: PeopleComponent,
-})
-
-function PeopleComponent() {
-  const data = Route.useLoaderData()
-  return (
-    <ul>
-      {data.results.map((person) => (
-        <li key={person.name}>{person.name}</li>
-      ))}
-    </ul>
-  )
-}
-```
-
-Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
-
-# Demo files
-
-Files prefixed with `demo` can be safely deleted. They are there to provide a starting point for you to play around with the features you've installed.
-
-# Learn More
-
-You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
-
-For TanStack Start specific documentation, visit [TanStack Start](https://tanstack.com/start).
+- [`docs/write-up.md`](/Users/bowanglan/Dev/flytie/docs/write-up.md): implementation notes, problems encountered, and feature status
+- [`docs/write-up-2.md`](/Users/bowanglan/Dev/flytie/docs/write-up-2.md): project retrospective and architecture decisions
+- [`docs/replay-timeline-scrub.md`](/Users/bowanglan/Dev/flytie/docs/replay-timeline-scrub.md): replay system architecture and data flow
+- [`CLAUDE.md`](/Users/bowanglan/Dev/flytie/CLAUDE.md): project-specific development notes

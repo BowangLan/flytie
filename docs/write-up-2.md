@@ -16,14 +16,17 @@ Flytie is a flight-tracking web app centered around an interactive world map. Th
 - searching for flights quickly
 - replaying historical movement for a given day
 
+## Tech Stack
+
 The app is built with:
 
 - TanStack Start and React
 - Zustand for local app state
 - deck.gl + MapLibre for map rendering
-- ADS-B Exchange sample data for live-ish aircraft state and historical traces
-- AeroDataBox for richer flight metadata
+- Convex for database and data fetching
 - Redis/Upstash-backed caching for heavier replay requests
+- AeroDataBox for richer flight metadata
+- ADS-B Exchange sample data for live-ish aircraft state and historical traces
 
 ## What I Built
 
@@ -203,7 +206,7 @@ The capabilities and limitations of external data providers directly shaped what
 
 - Splitting live position data from richer flight-detail data
 - Moving to deck.gl + MapLibre
-- Using Zustand for focused UI state
+- Using Zustand for global UI state
 - Keeping replay heavy data outside React state
 - Adding caching layers for replay workloads
 - Iterating quickly through interaction bugs using small targeted commits
@@ -238,11 +241,6 @@ The capabilities and limitations of external data providers directly shaped what
 - I also used airport data for geo location, name, and code metadata
 - sources included OurAirports and AeroDataBox
 - OurAirports: <https://ourairports.com/data/>
-
-## Rendering Libraries
-
-- MapLibre GL JS: <https://github.com/maplibre/maplibre-gl-js/>
-- deck.gl with MapLibre examples: <https://deck.gl/examples/maplibre>
 
 ## Features
 
