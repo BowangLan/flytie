@@ -313,26 +313,26 @@ export function createWorldMapLayers({
   } as const
   const hideSelectedInBaseLayers = selectedAircraft != null
   const baseAircraft = aircraft
+  const routeLayer = new PathLayer<RouteSegment>({
+    id: 'selected-flight-route',
+    data: routeSegments,
+    pickable: false,
+    widthUnits: 'pixels',
+    widthMinPixels: 2,
+    getWidth: 3,
+    getColor: (segment) =>
+      new Uint8Array(
+        colorToRgba(
+          segment.type === 'past'
+            ? WORLD_MAP_COLORS.routePast
+            : WORLD_MAP_COLORS.routeFuture,
+          255,
+        ),
+      ),
+    getPath: (segment) => segment.path,
+  })
 
   return [
-    new PathLayer<RouteSegment>({
-      id: 'selected-flight-route',
-      data: routeSegments,
-      pickable: false,
-      widthUnits: 'pixels',
-      widthMinPixels: 2,
-      getWidth: 2,
-      getColor: (segment) =>
-        new Uint8Array(
-          colorToRgba(
-            segment.type === 'past'
-              ? WORLD_MAP_COLORS.routePast
-              : WORLD_MAP_COLORS.routeFuture,
-            255,
-          ),
-        ),
-      getPath: (segment) => segment.path,
-    }),
     new IconLayer<AdsbAircraft>({
       id: 'flight-marker-borders',
       data: baseAircraft,
@@ -431,6 +431,7 @@ export function createWorldMapLayers({
         onSelect(aircraftObject ? aircraftObject.hex.toLowerCase() : null)
       },
     }),
+    routeLayer,
     new IconLayer<AdsbAircraft>({
       id: 'selected-flight-marker-border',
       data: selectedAircraft ? [selectedAircraft] : [],
