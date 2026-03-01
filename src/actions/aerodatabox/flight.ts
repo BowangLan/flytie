@@ -1,5 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import z from 'zod'
+import { getOrSet } from '#/lib/cache'
 
 /** AeroDataBox airport location (lat/lon) */
 export interface AerodataboxLocation {
@@ -207,34 +208,42 @@ export const getFlightByIcao24Action = createServerFn()
     }),
   )
   .handler(async ({ data }) => {
-    const { key, host } = getRapidApiConfig()
     const dateLocalRole = data.dateLocalRole ?? 'Both'
     const withAircraftImage = data.withAircraftImage ?? true
-    const params = new URLSearchParams({
-      dateLocalRole,
-      withAircraftImage: String(withAircraftImage),
-    })
-    const url = `https://${host}/flights/Icao24/${data.icao24}?${params}`
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        'X-RapidAPI-Key': key,
-        'X-RapidAPI-Host': host,
-      },
-    })
-    if (!res.ok) {
-      throw new Error(
-        `AeroDataBox API error: ${res.status}: ${await res.text()}`,
-      )
-    }
+    const cacheKey = `aerodatabox:flight:icao24:${data.icao24}:${dateLocalRole}:${withAircraftImage}`
 
-    const text = await res.text()
-    try {
-      const flights = JSON.parse(text) as AerodataboxFlightByIcao24Response
-      return flights
-    } catch (error) {
-      console.error('[getFlightByIcao24Action] error parsing response:', error)
-      throw error
-    }
+    return getOrSet<AerodataboxFlightByIcao24Response>(
+      cacheKey,
+      async () => {
+        const { key, host } = getRapidApiConfig()
+        const params = new URLSearchParams({
+          dateLocalRole,
+          withAircraftImage: String(withAircraftImage),
+        })
+        const url = `https://${host}/flights/Icao24/${data.icao24}?${params}`
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            'X-RapidAPI-Key': key,
+            'X-RapidAPI-Host': host,
+          },
+        })
+        if (!res.ok) {
+          throw new Error(
+            `AeroDataBox API error: ${res.status}: ${await res.text()}`,
+          )
+        }
+
+        const text = await res.text()
+        try {
+          const flights = JSON.parse(text) as AerodataboxFlightByIcao24Response
+          return flights
+        } catch (error) {
+          console.error('[getFlightByIcao24Action] error parsing response:', error)
+          throw error
+        }
+      },
+      2,
+    )
   })

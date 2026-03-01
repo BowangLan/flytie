@@ -1,4 +1,5 @@
-import { createClient, type RedisClientType } from 'redis'
+import { createClient  } from 'redis'
+import type {RedisClientType} from 'redis';
 
 let client: RedisClientType | null = null
 let connectPromise: Promise<RedisClientType> | null = null

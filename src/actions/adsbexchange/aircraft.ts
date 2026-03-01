@@ -1,5 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import z from 'zod'
+import { getOrSet } from '#/lib/cache'
 
 /** Aircraft from ADS-B Exchange API (v2) */
 export interface AdsbAircraft {
@@ -38,7 +39,7 @@ export interface AdsbAircraft {
   /** Total message count from this transponder */
   messages: number
   /** Multilateration timestamps */
-  mlat: unknown[]
+  mlat: object[]
   /** Navigation Accuracy Category – position (0–11) */
   nac_p: number
   /** Navigation Accuracy Category – velocity (0–2) */
@@ -86,7 +87,7 @@ export interface AdsbAircraft {
   /** Total air temperature in °C */
   tat?: number
   /** TIS-B (Traffic Information Service) data */
-  tisb: unknown[]
+  tisb: object[]
   /** Ground track in degrees (0–360, clockwise from north) */
   track: number
   /** Track rate in deg/s */
@@ -123,23 +124,30 @@ async function fetchNearbyAircraft(
   lon: number,
   dist: number,
 ): Promise<AdsbAircraft[]> {
-  const { key, host } = getRapidApiConfig()
-  const url = `https://${host}/v2/lat/${lat}/lon/${lon}/dist/${dist}/`
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'x-rapidapi-key': key,
-      'x-rapidapi-host': host,
-      'Content-Type': 'application/json',
+  const cacheKey = `adsbexchange:nearby:${lat}:${lon}:${dist}`
+  return getOrSet<AdsbAircraft[]>(
+    cacheKey,
+    async () => {
+      const { key, host } = getRapidApiConfig()
+      const url = `https://${host}/v2/lat/${lat}/lon/${lon}/dist/${dist}/`
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'x-rapidapi-key': key,
+          'x-rapidapi-host': host,
+          'Content-Type': 'application/json',
+        },
+      })
+      if (!res.ok) {
+        throw new Error(
+          `ADSBExchange API error: ${res.status}: ${await res.text()}`,
+        )
+      }
+      const body = (await res.json()) as AdsbExchangeResponse
+      return body.ac
     },
-  })
-  if (!res.ok) {
-    throw new Error(
-      `ADSBExchange API error: ${res.status}: ${await res.text()}`,
-    )
-  }
-  const body = (await res.json()) as AdsbExchangeResponse
-  return body.ac
+    2,
+  )
 }
 
 /**
