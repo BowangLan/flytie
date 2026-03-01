@@ -1,6 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import z from 'zod'
-import { getOrSetMany } from '#/lib/cache'
+import { getOrSet, getOrSetMany } from '#/lib/cache'
 
 const BASE_URL = 'https://samples.adsbexchange.com'
 
@@ -73,6 +73,16 @@ function traceCacheKey(icao24: string, year: number, month: number, day: number)
   return `trace:${icao}:${year}:${month}:${day}`
 }
 
+function tracesBatchCacheKey(
+  icao24List: string[],
+  year: number,
+  month: number,
+  day: number,
+) {
+  const sorted = [...icao24List].map((s) => s.toLowerCase()).sort()
+  return `traces:${year}:${month}:${day}:${sorted.join(',')}`
+}
+
 async function fetchTraces(
   icao24: string,
   year: number,
@@ -115,12 +125,20 @@ export const getTracesAction = createServerFn()
     }),
   )
   .handler(async ({ data }) => {
-    const traces = await getOrSetMany(
-      data.icao24.map((icao24) => ({
-        key: traceCacheKey(icao24, data.year, data.month, data.day),
-        fetcher: () => fetchTraces(icao24, data.year, data.month, data.day),
-      })),
+    const batchKey = tracesBatchCacheKey(
+      data.icao24,
+      data.year,
+      data.month,
+      data.day,
     )
+    const traces = await getOrSet(batchKey, async () => {
+      return getOrSetMany(
+        data.icao24.map((icao24) => ({
+          key: traceCacheKey(icao24, data.year, data.month, data.day),
+          fetcher: () => fetchTraces(icao24, data.year, data.month, data.day),
+        })),
+      )
+    })
     console.log(`[getTracesAction] Loaded ${traces.length} traces`)
     return traces
   })
