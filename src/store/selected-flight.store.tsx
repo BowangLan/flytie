@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { useMemo } from 'react'
-import type { AerodataboxFlight } from '../../convex/lib/aerodatabox'
+import type { AerodataboxFlight } from '#/actions/aerodatabox/flight'
 
 export type SelectedFlightState = {
   selectedIcao24: string | null

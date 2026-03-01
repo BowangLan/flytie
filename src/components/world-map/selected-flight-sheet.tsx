@@ -24,7 +24,7 @@ import {
   formatTimeForDisplay,
   parseUtc,
 } from '#/lib/flight-time'
-import type { AerodataboxFlight } from '../../../convex/lib/aerodatabox'
+import type { AerodataboxFlight } from '#/actions/aerodatabox/flight'
 import type { AdsbAircraft } from '#/components/world-map/flights'
 import { useFlightsStore } from '#/store/flights-store'
 import { useSelectedFlightStore } from '#/store/selected-flight.store'

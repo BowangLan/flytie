@@ -1,7 +1,5 @@
-import { action } from '../_generated/server'
-import { v } from 'convex/values'
-
-/** NOTE: RapidAPI key is hardcoded for demo—move to environment for production. */
+import { createServerFn } from '@tanstack/react-start'
+import z from 'zod'
 
 /** AeroDataBox airport location (lat/lon) */
 export interface AerodataboxLocation {
@@ -167,41 +165,7 @@ export interface AerodataboxFlight {
   lastUpdatedUtc: string
   location?: AerodataboxFlightLocation
   number: string
-
-  /**
-   * Flight progress status.
-   * 
-   * Possible values:
-   *   0 - Unknown: Status is not available for this flight
-   *   1 - Expected: Expected
-   *   2 - EnRoute: En route
-   *   3 - CheckIn: Check-in is open
-   *   4 - Boarding: Boarding in progress / Last call
-   *   5 - GateClosed: Gate closed
-   *   6 - Departed: Departed
-   *   7 - Delayed: Delayed
-   *   8 - Approaching: On approach to destination
-   *   9 - Arrived: Arrived
-   *   10 - Canceled: Cancelled
-   *   11 - Diverted: Diverted to another destination
-   *   12 - CanceledUncertain: Status of the flight is uncertain, may be cancelled
-   * 
-   * Allowed string values:
-   *   "Unknown"
-   *   "Expected"
-   *   "EnRoute"
-   *   "CheckIn"
-   *   "Boarding"
-   *   "GateClosed"
-   *   "Departed"
-   *   "Delayed"
-   *   "Approaching"
-   *   "Arrived"
-   *   "Canceled"
-   *   "Diverted"
-   *   "CanceledUncertain"
-   */
-  status: 
+  status:
     | 'Unknown'
     | 'Expected'
     | 'EnRoute'
@@ -219,51 +183,58 @@ export interface AerodataboxFlight {
 
 export type AerodataboxFlightByIcao24Response = AerodataboxFlight[]
 
-const RAPIDAPI_KEY = '543928b6e4msheab5962d2d44babp1975f5jsndd8044f6469f'
-const RAPIDAPI_HOST = 'aerodatabox.p.rapidapi.com'
+function getRapidApiConfig() {
+  const key = process.env.RAPIDAPI_KEY
+  const host = process.env.RAPIDAPI_HOST_AERODATABOX
+  if (!key || !host) {
+    throw new Error(
+      'Missing RAPIDAPI_KEY or RAPIDAPI_HOST_AERODATABOX environment variables',
+    )
+  }
+  return { key, host }
+}
 
 /**
  * Fetches flight(s) by ICAO 24-bit transponder address from AeroDataBox.
  * @see https://doc.aerodatabox.com/rapidapi.html#/operations/GetFlight_FlightNearest
  */
-export const fetchFlightByIcao24 = action({
-  args: {
-    icao24: v.string(),
-    dateLocalRole: v.optional(
-      v.union(v.literal('Departure'), v.literal('Arrival'), v.literal('Both')),
-    ),
-    withAircraftImage: v.optional(v.boolean()),
-  },
-  handler: async (
-    ctx,
-    { icao24, dateLocalRole = 'Both', withAircraftImage = true },
-  ) => {
+export const getFlightByIcao24Action = createServerFn()
+  .inputValidator(
+    z.object({
+      icao24: z.string(),
+      dateLocalRole: z.enum(['Departure', 'Arrival', 'Both']).optional(),
+      withAircraftImage: z.boolean().optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { key, host } = getRapidApiConfig()
+    const dateLocalRole = data.dateLocalRole ?? 'Both'
+    const withAircraftImage = data.withAircraftImage ?? true
     const params = new URLSearchParams({
       dateLocalRole,
       withAircraftImage: String(withAircraftImage),
     })
-    const url = `https://${RAPIDAPI_HOST}/flights/Icao24/${icao24}?${params}`
+    const url = `https://${host}/flights/Icao24/${data.icao24}?${params}`
     const res = await fetch(url, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
-        'X-RapidAPI-Key': RAPIDAPI_KEY,
-        'X-RapidAPI-Host': RAPIDAPI_HOST,
+        'X-RapidAPI-Key': key,
+        'X-RapidAPI-Host': host,
       },
     })
-    if (!res.ok)
+    if (!res.ok) {
       throw new Error(
         `AeroDataBox API error: ${res.status}: ${await res.text()}`,
       )
+    }
 
     const text = await res.text()
-    console.log('[fetchFlightByIcao24] response text:', text)
     try {
-      const data = JSON.parse(text) as AerodataboxFlightByIcao24Response
-      return data
+      const flights = JSON.parse(text) as AerodataboxFlightByIcao24Response
+      return flights
     } catch (error) {
-      console.error('[fetchFlightByIcao24] error parsing response:', error)
+      console.error('[getFlightByIcao24Action] error parsing response:', error)
       throw error
     }
-  },
-})
+  })

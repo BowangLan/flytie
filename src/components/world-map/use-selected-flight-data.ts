@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
-import { useAction } from 'convex/react'
-import { api } from '../../../convex/_generated/api'
+import { getFlightByIcao24Action } from '#/actions/aerodatabox/flight'
 import { useSelectedFlightStore } from '#/store/selected-flight.store'
 
 function createAbortError() {
@@ -49,7 +48,6 @@ export function useSelectedFlightData() {
   const setAerodataError = useSelectedFlightStore(
     (state) => state.setAerodataError,
   )
-  const fetchFlightByIcao24 = useAction(api.lib.aerodatabox.fetchFlightByIcao24)
 
   useEffect(() => {
     if (!selectedIcao24) {
@@ -66,7 +64,7 @@ export function useSelectedFlightData() {
     setAerodataFlight(null)
 
     void abortable(
-      fetchFlightByIcao24({ icao24: selectedIcao24 }),
+      getFlightByIcao24Action({ data: { icao24: selectedIcao24 } }),
       abortController.signal,
     )
       .then((flights) => {
@@ -130,7 +128,6 @@ export function useSelectedFlightData() {
     }
   }, [
     selectedIcao24,
-    fetchFlightByIcao24,
     setAerodataFlight,
     setAerodataLoading,
     setAerodataError,
