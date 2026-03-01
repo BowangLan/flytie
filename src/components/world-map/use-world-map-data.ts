@@ -1,20 +1,15 @@
-import { useAction } from 'convex/react'
 import { startTransition, useEffect, useMemo, useState } from 'react'
-import { api } from '../../../convex/_generated/api'
+import { getAircraftAllAction } from '#/actions/adsbexchange/aircraft'
 import type { AdsbAircraft } from './flights'
 import { createWorldMapDataSource } from './data-source'
 import type { WorldMapDataSnapshot, WorldMapDataSource } from './data-source'
 import { useFlightsStore } from '#/store/flights-store'
 import { useSelectedFlightStore } from '#/store/selected-flight.store'
 
-function createDefaultWorldMapDataSource(
-  fetchAircraftAll: () => Promise<string>,
-): WorldMapDataSource {
+function createDefaultWorldMapDataSource(): WorldMapDataSource {
   return createWorldMapDataSource({
     loadAircraft: async () => {
-      const response = await fetchAircraftAll()
-      const data = JSON.parse(response) as { ac: AdsbAircraft[] }
-      return data.ac
+      return getAircraftAllAction()
     },
   })
 }
@@ -25,13 +20,12 @@ const REFRESH_INTERVAL_MS = 10_000 // 10 seconds
 export function useWorldMapData(
   dataSource?: WorldMapDataSource,
 ): WorldMapDataSnapshot {
-  const fetchAircraftAll = useAction(api.lib.adbsexchange.fetchAircraftAll)
   const selectedIcao24 = useSelectedFlightStore((state) => state.selectedIcao24)
   const [aircraft, setAircraft] = useState<AdsbAircraft[]>([])
 
   const resolvedDataSource = useMemo(
-    () => dataSource ?? createDefaultWorldMapDataSource(fetchAircraftAll),
-    [dataSource, fetchAircraftAll],
+    () => dataSource ?? createDefaultWorldMapDataSource(),
+    [dataSource],
   )
 
   useEffect(() => {

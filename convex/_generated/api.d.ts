@@ -9,7 +9,6 @@
  */
 
 import type * as airports from "../airports.js";
-import type * as lib_adbsexchange from "../lib/adbsexchange.js";
 import type * as lib_opensky from "../lib/opensky.js";
 import type * as states from "../states.js";
 import type * as statesTypes from "../statesTypes.js";
@@ -23,7 +22,6 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   airports: typeof airports;
-  "lib/adbsexchange": typeof lib_adbsexchange;
   "lib/opensky": typeof lib_opensky;
   states: typeof states;
   statesTypes: typeof statesTypes;
