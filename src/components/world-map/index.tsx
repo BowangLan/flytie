@@ -62,6 +62,7 @@ import {
 import { FlightSearchDialog } from './flight-search-dialog'
 import { WorldMapToolbar } from './world-map-toolbar'
 import { jsonObjSize, roughObjectSize } from '#/lib/utils'
+import { useFlightsStore } from '#/store/flights-store'
 
 const REPLAY_MAX_TRACES_PER_DAY = 2000
 const REPLAY_BATCH_SIZE = 50
@@ -172,15 +173,9 @@ export default function WorldMap({
     applyMapStyleOverrides(map)
   }, [])
 
-  const selectedAircraft = useMemo(
-    () =>
-      selectedIcao24
-        ? (aircraftForRender.find((item) => item.hex.toLowerCase() === selectedIcao24) ??
-          null)
-        : null,
-    [aircraftForRender, selectedIcao24],
-  )
+  const selectedAircraft = useFlightsStore((state) => selectedIcao24 ? state.map.get(selectedIcao24) ?? null : null)
 
+  // const routeSegments: RouteSegment[] = [];
   const routeSegments = useMemo<RouteSegment[]>(() => {
     const departure = aerodataFlight?.departure.airport.location
     const arrival = aerodataFlight?.arrival.airport.location
@@ -371,15 +366,15 @@ export default function WorldMap({
     setReplayTraceCount,
   ])
 
-  useEffect(() => {
-    if (!selectedAircraft || !mapRef.current) return
+  // useEffect(() => {
+  //   if (!selectedAircraft || !mapRef.current) return
 
-    mapRef.current.easeTo({
-      center: [selectedAircraft.lon, selectedAircraft.lat],
-      duration: 700,
-      essential: true,
-    })
-  }, [selectedAircraft])
+  //   mapRef.current.easeTo({
+  //     center: [selectedAircraft.lon, selectedAircraft.lat],
+  //     duration: 700,
+  //     essential: true,
+  //   })
+  // }, [selectedAircraft])
 
   if (!isClient) {
     return (

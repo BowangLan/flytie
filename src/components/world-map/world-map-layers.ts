@@ -8,6 +8,8 @@ import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
 const MARKER_SIZE_PX = 22
 const MARKER_MIN_SIZE_PX = 18
 const MARKER_MAX_SIZE_PX = 28
+const MARKER_HIT_TARGET_MULTIPLIER = 1.5
+const MARKER_HIT_TARGET_ALPHA = 1
 const ROUTE_STEPS = 64
 const MARKER_POSITION_TRANSITION_MS = 90
 const MARKER_ANGLE_TRANSITION_MS = 120
@@ -15,9 +17,22 @@ const MARKER_ANGLE_TRANSITION_MS = 120
 const PLANE_SVG_PATH =
   'M21 16.2632V14.3684L13.4211 9.63158V4.42105C13.4211 3.63474 12.7863 3 12 3C11.2137 3 10.5789 3.63474 10.5789 4.42105V9.63158L3 14.3684V16.2632L10.5789 13.8947V19.1053L8.68421 20.5263V21.9474L12 21L15.3158 21.9474V20.5263L13.4211 19.1053V13.8947L21 16.2632Z'
 const PLANE_ATLAS_SIZE = 128
+const HIT_TARGET_SQUARE_SVG_PATH = 'M2 2H22V22H2Z'
 
 const PLANE_ICON_MAPPING = {
   plane: {
+    x: 0,
+    y: 0,
+    width: PLANE_ATLAS_SIZE,
+    height: PLANE_ATLAS_SIZE,
+    anchorX: PLANE_ATLAS_SIZE / 2,
+    anchorY: PLANE_ATLAS_SIZE / 2,
+    mask: true,
+  },
+}
+
+const HIT_TARGET_ICON_MAPPING = {
+  hitTarget: {
     x: 0,
     y: 0,
     width: PLANE_ATLAS_SIZE,
@@ -34,6 +49,10 @@ const PLANE_ICON_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
 
 const PLANE_BORDER_ICON_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="${PLANE_ATLAS_SIZE}" height="${PLANE_ATLAS_SIZE}" viewBox="0 0 24 24"><path d="${PLANE_SVG_PATH}" fill="black" stroke="black" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/></svg>`,
+)}`
+
+const HIT_TARGET_ICON_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${PLANE_ATLAS_SIZE}" height="${PLANE_ATLAS_SIZE}" viewBox="0 0 24 24"><path d="${HIT_TARGET_SQUARE_SVG_PATH}" fill="black"/></svg>`,
 )}`
 
 const COLOR_MARKER = colorToRgba(WORLD_MAP_COLORS.marker, 255)
@@ -124,6 +143,17 @@ function getMarkerSize(
   if (icao24 === selectedIcao24) return baseSize + 5
   if (icao24 === hoveredIcao24) return baseSize + 3
   return baseSize
+}
+
+function getMarkerHitTargetSize(
+  aircraft: AdsbAircraft,
+  selectedIcao24: string | null,
+  hoveredIcao24: string | null,
+) {
+  return (
+    getMarkerSize(aircraft, selectedIcao24, hoveredIcao24) *
+    MARKER_HIT_TARGET_MULTIPLIER
+  )
 }
 
 function greatCirclePoint(
@@ -279,6 +309,9 @@ export function createWorldMapLayers({
     },
   } as const
   const hideSelectedInBaseLayers = selectedAircraft != null
+  const baseAircraft = hideSelectedInBaseLayers
+    ? aircraft.filter((item) => item.hex.toLowerCase() !== selectedIcao24)
+    : aircraft
 
   return [
     new PathLayer<RouteSegment>({
@@ -301,7 +334,7 @@ export function createWorldMapLayers({
     }),
     new IconLayer<AdsbAircraft>({
       id: 'flight-marker-borders',
-      data: aircraft,
+      data: baseAircraft,
       pickable: false,
       iconAtlas: PLANE_BORDER_ICON_ATLAS,
       iconMapping: PLANE_ICON_MAPPING,
@@ -328,8 +361,8 @@ export function createWorldMapLayers({
     }),
     new IconLayer<AdsbAircraft>({
       id: 'flight-markers',
-      data: aircraft,
-      pickable: true,
+      data: baseAircraft,
+      pickable: false,
       autoHighlight: false,
       iconAtlas: PLANE_ICON_ATLAS,
       iconMapping: PLANE_ICON_MAPPING,
@@ -351,6 +384,27 @@ export function createWorldMapLayers({
       transitions: markerTransitions,
       updateTriggers: {
         getColor: [selectedIcao24, hoveredIcao24],
+        getSize: [selectedIcao24, hoveredIcao24],
+      },
+    }),
+    new IconLayer<AdsbAircraft>({
+      id: 'flight-marker-hit-targets',
+      data: baseAircraft,
+      pickable: true,
+      autoHighlight: false,
+      iconAtlas: HIT_TARGET_ICON_ATLAS,
+      iconMapping: HIT_TARGET_ICON_MAPPING,
+      getIcon: () => 'hitTarget',
+      getPosition: (item) => [item.lon, item.lat],
+      getColor: () => new Uint8Array([0, 0, 0, MARKER_HIT_TARGET_ALPHA]),
+      getSize: (item) =>
+        getMarkerHitTargetSize(item, selectedIcao24, hoveredIcao24),
+      sizeUnits: 'pixels',
+      sizeMinPixels: MARKER_MIN_SIZE_PX * MARKER_HIT_TARGET_MULTIPLIER,
+      sizeMaxPixels: MARKER_MAX_SIZE_PX * MARKER_HIT_TARGET_MULTIPLIER,
+      alphaCutoff: 0,
+      transitions: markerTransitions,
+      updateTriggers: {
         getSize: [selectedIcao24, hoveredIcao24],
       },
       onHover,
@@ -383,7 +437,7 @@ export function createWorldMapLayers({
     new IconLayer<AdsbAircraft>({
       id: 'selected-flight-marker',
       data: selectedAircraft ? [selectedAircraft] : [],
-      pickable: true,
+      pickable: false,
       autoHighlight: false,
       iconAtlas: PLANE_ICON_ATLAS,
       iconMapping: PLANE_ICON_MAPPING,
@@ -398,6 +452,26 @@ export function createWorldMapLayers({
       alphaCutoff: 0.05,
       updateTriggers: {
         getColor: [selectedIcao24, hoveredIcao24],
+        getSize: [selectedIcao24, hoveredIcao24],
+      },
+    }),
+    new IconLayer<AdsbAircraft>({
+      id: 'selected-flight-marker-hit-target',
+      data: selectedAircraft ? [selectedAircraft] : [],
+      pickable: true,
+      autoHighlight: false,
+      iconAtlas: HIT_TARGET_ICON_ATLAS,
+      iconMapping: HIT_TARGET_ICON_MAPPING,
+      getIcon: () => 'hitTarget',
+      getPosition: (item) => [item.lon, item.lat],
+      getColor: () => new Uint8Array([0, 0, 0, MARKER_HIT_TARGET_ALPHA]),
+      getSize: (item) =>
+        getMarkerHitTargetSize(item, selectedIcao24, hoveredIcao24),
+      sizeUnits: 'pixels',
+      sizeMinPixels: MARKER_MIN_SIZE_PX * MARKER_HIT_TARGET_MULTIPLIER,
+      sizeMaxPixels: MARKER_MAX_SIZE_PX * MARKER_HIT_TARGET_MULTIPLIER,
+      alphaCutoff: 0,
+      updateTriggers: {
         getSize: [selectedIcao24, hoveredIcao24],
       },
       onHover,
