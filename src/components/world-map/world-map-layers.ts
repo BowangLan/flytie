@@ -136,10 +136,12 @@ function getMarkerSize(
   aircraft: AdsbAircraft,
   selectedIcao24: string | null,
   hoveredIcao24: string | null,
+  hideSelected = false,
 ) {
   const icao24 = aircraft.hex.toLowerCase()
   const baseSize = MARKER_SIZE_PX * getAircraftSizeScale(aircraft.category)
 
+  if (hideSelected && icao24 === selectedIcao24) return 0
   if (icao24 === selectedIcao24) return baseSize + 5
   if (icao24 === hoveredIcao24) return baseSize + 3
   return baseSize
@@ -149,9 +151,10 @@ function getMarkerHitTargetSize(
   aircraft: AdsbAircraft,
   selectedIcao24: string | null,
   hoveredIcao24: string | null,
+  hideSelected = false,
 ) {
   return (
-    getMarkerSize(aircraft, selectedIcao24, hoveredIcao24) *
+    getMarkerSize(aircraft, selectedIcao24, hoveredIcao24, hideSelected) *
     MARKER_HIT_TARGET_MULTIPLIER
   )
 }
@@ -309,9 +312,7 @@ export function createWorldMapLayers({
     },
   } as const
   const hideSelectedInBaseLayers = selectedAircraft != null
-  const baseAircraft = hideSelectedInBaseLayers
-    ? aircraft.filter((item) => item.hex.toLowerCase() !== selectedIcao24)
-    : aircraft
+  const baseAircraft = aircraft
 
   return [
     new PathLayer<RouteSegment>({
@@ -348,7 +349,13 @@ export function createWorldMapLayers({
           hoveredIcao24,
           hideSelectedInBaseLayers,
         ),
-      getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
+      getSize: (item) =>
+        getMarkerSize(
+          item,
+          selectedIcao24,
+          hoveredIcao24,
+          hideSelectedInBaseLayers,
+        ),
       sizeUnits: 'pixels',
       sizeMinPixels: MARKER_MIN_SIZE_PX,
       sizeMaxPixels: MARKER_MAX_SIZE_PX,
@@ -376,7 +383,13 @@ export function createWorldMapLayers({
           hoveredIcao24,
           hideSelectedInBaseLayers,
         ),
-      getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
+      getSize: (item) =>
+        getMarkerSize(
+          item,
+          selectedIcao24,
+          hoveredIcao24,
+          hideSelectedInBaseLayers,
+        ),
       sizeUnits: 'pixels',
       sizeMinPixels: MARKER_MIN_SIZE_PX,
       sizeMaxPixels: MARKER_MAX_SIZE_PX,
@@ -398,7 +411,12 @@ export function createWorldMapLayers({
       getPosition: (item) => [item.lon, item.lat],
       getColor: () => new Uint8Array([0, 0, 0, MARKER_HIT_TARGET_ALPHA]),
       getSize: (item) =>
-        getMarkerHitTargetSize(item, selectedIcao24, hoveredIcao24),
+        getMarkerHitTargetSize(
+          item,
+          selectedIcao24,
+          hoveredIcao24,
+          hideSelectedInBaseLayers,
+        ),
       sizeUnits: 'pixels',
       sizeMinPixels: MARKER_MIN_SIZE_PX * MARKER_HIT_TARGET_MULTIPLIER,
       sizeMaxPixels: MARKER_MAX_SIZE_PX * MARKER_HIT_TARGET_MULTIPLIER,
