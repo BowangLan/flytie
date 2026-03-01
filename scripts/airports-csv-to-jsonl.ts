@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
+// Run: bun run scripts/airports-csv-to-jsonl.ts
 /**
  * Converts OurAirports airports.csv to JSONL for Convex import.
  * Handles empty cells by omitting optional fields.
- * Run: bun run scripts/airports-csv-to-jsonl.ts
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'

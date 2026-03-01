@@ -3,35 +3,17 @@ import { v } from 'convex/values'
 import { stateDataFields } from './statesTypes'
 
 export default defineSchema({
-  products: defineTable({
-    title: v.string(),
-    imageId: v.string(),
-    price: v.number(),
-  }),
-  todos: defineTable({
-    text: v.string(),
-    completed: v.boolean(),
-  }),
+  // ADSB Exchange traces
+  traces: defineTable({
+    icao: v.string(),
+    r: v.optional(v.string()),
+    t: v.optional(v.string()),
+    desc: v.optional(v.string()),
+    trace: v.array(v.array(v.number())),
+  }).index('by_icao', ['icao']),
 
-  /** One row per aircraft in the active (or pending) snapshot. */
-  states: defineTable({
-    /** Unix ms timestamp identifying which fetch batch this row belongs to. */
-    snapshotTime: v.number(),
-    ...stateDataFields,
-  }).index('by_snapshotTime', ['snapshotTime']),
-
-  icao24States: defineTable({
-    icao24: v.string(),
-    estDepartureAirport: v.optional(v.string()),
-    estArrivalAirport: v.optional(v.string()),
-    lastSeen: v.number(),
-  }).index('by_icao24', ['icao24']),
-
-  /** Singleton — tracks which snapshotTime is currently active (fully inserted). */
-  stateMeta: defineTable({
-    activeSnapshotTime: v.number(),
-  }),
-
+  // Deprecated (kind of?)
+  // Reason: aerodatabox API's flight detail endpoint already contains the essential airport data
   /** Airports from OurAirports open data (ident = ICAO code for lookup). */
   airports: defineTable({
     id: v.number(),
@@ -56,4 +38,22 @@ export default defineSchema({
   })
     .index('by_ident', ['ident'])
     .index('by_icao_code', ['icao_code']),
+
+
+  // Deprecated
+  // Used for storing /states/all from OpenSky
+  /** One row per aircraft in the active (or pending) snapshot. */
+  states: defineTable({
+    /** Unix ms timestamp identifying which fetch batch this row belongs to. */
+    snapshotTime: v.number(),
+    ...stateDataFields,
+  }).index('by_snapshotTime', ['snapshotTime']),
+
+
+  // Deprecated
+  // OpenSky /states/all snapshot metadata
+  /** Singleton — tracks which snapshotTime is currently active (fully inserted). */
+  stateMeta: defineTable({
+    activeSnapshotTime: v.number(),
+  }),
 })

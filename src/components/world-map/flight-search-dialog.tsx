@@ -3,6 +3,7 @@ import { Dialog as DialogPrimitive } from 'radix-ui'
 import { Search } from 'lucide-react'
 import type { AdsbAircraft } from './flights'
 import { cn } from '#/lib/utils'
+import { useFlightSearchStore } from '#/store/flight-search-store'
 import { searchFlightsLocally, useFlightSearchIndex } from './use-flight-search'
 
 type FlightSearchDialogProps = {
@@ -14,7 +15,9 @@ export function FlightSearchDialog({
   aircraft,
   onSelectIcao24,
 }: FlightSearchDialogProps) {
-  const [open, setOpen] = useState(false)
+  const open = useFlightSearchStore((state) => state.open)
+  const setOpen = useFlightSearchStore((state) => state.setOpen)
+  const toggleOpen = useFlightSearchStore((state) => state.toggleOpen)
   const [query, setQuery] = useState('')
   const inputRef = useRef<HTMLInputElement | null>(null)
   const inputId = useId()
@@ -34,12 +37,12 @@ export function FlightSearchDialog({
 
       if (!isOpenShortcut) return
       event.preventDefault()
-      setOpen((current) => !current)
+      toggleOpen()
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [toggleOpen])
 
   useEffect(() => {
     if (!open) {
@@ -62,21 +65,6 @@ export function FlightSearchDialog({
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
-      <DialogPrimitive.Trigger asChild>
-        <button
-          type="button"
-          className={cn(
-            'pointer-events-auto inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-black/55 px-3 py-2 text-sm text-white shadow-[0_16px_48px_rgba(0,0,0,0.28)] backdrop-blur-md transition hover:border-white/25 hover:bg-black/65 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60',
-          )}
-        >
-          <Search className="size-4 text-cyan-200" />
-          <span>Search flights</span>
-          <span className="rounded-md border border-white/10 bg-white/6 px-1.5 py-0.5 font-mono text-[11px] text-white/70">
-            Ctrl/Cmd K
-          </span>
-        </button>
-      </DialogPrimitive.Trigger>
-
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <DialogPrimitive.Content

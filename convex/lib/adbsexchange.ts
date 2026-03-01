@@ -164,13 +164,147 @@ export const fetchAircraftAll = action({
   },
 })
 
-export const fetchFlightStates = action({
+
+/**
+ * Adsb Exchange API: traces
+ * 
+ * "Trace Files" – Activity by individual ICAO hex code for all aircraft during a 24-hour period.
+ * Files are stored in subdirectories named by the last two digits of the hex code.
+ * Example: For ICAO hex "ABCD12", the file will be found under "12/trace_full_abcd12.json".
+ * 
+ * @see https://www.adsbexchange.com/products/historical-data
+ */
+
+
+export type AdsbExchangeTrace = {
+  icao: string
+  r: string
+  t: string
+  dbFlags: number
+  desc: string
+  ownOp: string
+  year: string
+  timestamp: number
+  trace: [
+    number,    // timestamp (seconds since epoch or relative day time)
+    number,    // latitude
+    number,    // longitude
+    number | string | null, // altitude (feet, can be null or missing)
+    number,    // ground speed (knots?)
+    number,    // track (degrees)
+    number,    // vertical rate (ft/min)
+    number | null, // barometric vertical rate (ft/min, can be null)
+    any,       // mode-s/adsb msg or object (can be null or object with msg data)
+    string,    // type ("adsb_icao" etc)
+    number | null, // geometric altitude
+    number | null, // vertical rate (duplicate or spare?)
+    any,       // reserved / unknown, often null
+    any        // reserved / unknown, often null
+  ][]
+}
+
+
+type AdsbExchangeTraceIndex = {
+  traces: string[]
+}
+
+
+const BASE_URL = "https://samples.adsbexchange.com"
+
+function getDatePath(year: number, month: number, day: number) {
+  return `${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`
+}
+
+async function getAdsbExchangeTraceIndexByDay(year: number, month: number, day: number) {
+  const datePath = getDatePath(year, month, day)
+  const url = `${BASE_URL}/traces/${datePath}/index.json`
+  const response = await fetch(url, {
+    headers: { 'Accept-Encoding': 'identity' },
+  })
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch trace index: ${response.status} ${response.statusText}`,
+    )
+  }
+
+  try {
+    const data = await response.json()
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      !('traces' in data) ||
+      !Array.isArray(data.traces)
+    ) {
+      throw new Error('Invalid trace index data')
+    }
+    return data as AdsbExchangeTraceIndex
+  } catch (error) {
+    throw new Error(`Failed to parse trace index: ${error}`)
+  }
+}
+
+async function getAdsbExchangeTracesByDayAndIcao(
+  icao24: string,
+  year: number,
+  month: number,
+  day: number,
+) {
+  const dateStr = getDatePath(year, month, day)
+  const xx = icao24.slice(-2).toLowerCase()
+  const icao = icao24.toLowerCase()
+  const url = `${BASE_URL}/traces/${dateStr}/${xx}/trace_full_${icao}.json`
+
+  const response = await fetch(url, {
+    headers: { 'Accept-Encoding': 'identity' },
+  })
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch traces: ${response.status} ${response.statusText}`,
+    )
+  }
+
+  try {
+    const data = await response.json()
+    if (!data || typeof data !== 'object' || !('trace' in data)) {
+      throw new Error('Invalid traces data')
+    }
+    return data as AdsbExchangeTrace
+  } catch (error) {
+    throw new Error(`Failed to parse traces: ${error}`)
+  }
+}
+
+export const fetchTracesByDayAndIcaos = action({
   args: {
-    icao24: v.string(),
+    year: v.number(),
+    month: v.number(),
+    day: v.number(),
+    icaos: v.array(v.string()),
   },
-  handler: async (ctx, { icao24 }) => {
-    // mock the data AdsbAircraft
-    const data: AdsbAircraft[] = []
-    return data
+  handler: async (ctx, { year, month, day, icaos }) => {
+    const BATCH_SIZE = 10
+    const traces: AdsbExchangeTrace[] = []
+    for (let i = 0; i < icaos.length; i += BATCH_SIZE) {
+      const batch = icaos.slice(i, i + BATCH_SIZE)
+      console.log(`[fetchTracesByDayAndIcaos] fetching batch ${i} of ${icaos.length}`)
+      const batchTraces = await Promise.all(
+        batch.map(icao => getAdsbExchangeTracesByDayAndIcao(icao, year, month, day))
+      )
+      traces.push(...batchTraces)
+    }
+    return traces
+  },
+})
+
+export const fetchTraceDayIndex = action({
+  args: {
+    year: v.number(),
+    month: v.number(),
+    day: v.number(),
+  },
+  handler: async (ctx, { year, month, day }) => {
+    return await getAdsbExchangeTraceIndexByDay(year, month, day)
   },
 })

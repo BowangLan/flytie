@@ -1,6 +1,7 @@
 import { IconLayer, PathLayer } from '@deck.gl/layers'
 import type { PickingInfo } from '@deck.gl/core'
 import type { AdsbAircraft } from './flights'
+import type { ReplayManager } from './replay-manager'
 import { getAircraftSizeScale } from './aircraft-size'
 import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
 
@@ -8,6 +9,8 @@ const MARKER_SIZE_PX = 22
 const MARKER_MIN_SIZE_PX = 18
 const MARKER_MAX_SIZE_PX = 28
 const ROUTE_STEPS = 64
+const MARKER_POSITION_TRANSITION_MS = 90
+const MARKER_ANGLE_TRANSITION_MS = 120
 
 const PLANE_SVG_PATH =
   'M21 16.2632V14.3684L13.4211 9.63158V4.42105C13.4211 3.63474 12.7863 3 12 3C11.2137 3 10.5789 3.63474 10.5789 4.42105V9.63158L3 14.3684V16.2632L10.5789 13.8947V19.1053L8.68421 20.5263V21.9474L12 21L15.3158 21.9474V20.5263L13.4211 19.1053V13.8947L21 16.2632Z'
@@ -32,6 +35,16 @@ const PLANE_ICON_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
 const PLANE_BORDER_ICON_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="${PLANE_ATLAS_SIZE}" height="${PLANE_ATLAS_SIZE}" viewBox="0 0 24 24"><path d="${PLANE_SVG_PATH}" fill="black" stroke="black" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/></svg>`,
 )}`
+
+const COLOR_MARKER = colorToRgba(WORLD_MAP_COLORS.marker, 255)
+const COLOR_MARKER_HOVER = colorToRgba(WORLD_MAP_COLORS.markerHover, 255)
+const COLOR_MARKER_SELECTED = colorToRgba(WORLD_MAP_COLORS.markerSelected, 255)
+const COLOR_MARKER_BORDER = colorToRgba('#0a0a0a', 255)
+const COLOR_MARKER_BORDER_HOVER = colorToRgba(WORLD_MAP_COLORS.label, 255)
+const COLOR_MARKER_BORDER_SELECTED = colorToRgba(
+  WORLD_MAP_COLORS.routeFuture,
+  255,
+)
 
 export type RouteSegment = {
   path: [number, number][]
@@ -146,30 +159,38 @@ function getMarkerColor(
   aircraft: AdsbAircraft,
   selectedIcao24: string | null,
   hoveredIcao24: string | null,
-) {
+  hideSelected = false,
+): Uint8Array {
   const icao24 = aircraft.hex.toLowerCase()
+  if (hideSelected && icao24 === selectedIcao24) {
+    return new Uint8Array([0, 0, 0, 0])
+  }
   if (icao24 === selectedIcao24) {
-    return colorToRgba(WORLD_MAP_COLORS.markerSelected, 255)
+    return new Uint8Array(COLOR_MARKER_SELECTED)
   }
   if (icao24 === hoveredIcao24) {
-    return colorToRgba(WORLD_MAP_COLORS.markerHover, 255)
+    return new Uint8Array(COLOR_MARKER_HOVER)
   }
-  return colorToRgba(WORLD_MAP_COLORS.marker, 255)
+  return new Uint8Array(COLOR_MARKER)
 }
 
 function getMarkerBorderColor(
   aircraft: AdsbAircraft,
   selectedIcao24: string | null,
   hoveredIcao24: string | null,
-) {
+  hideSelected = false,
+): Uint8Array {
   const icao24 = aircraft.hex.toLowerCase()
+  if (hideSelected && icao24 === selectedIcao24) {
+    return new Uint8Array([0, 0, 0, 0])
+  }
   if (icao24 === selectedIcao24) {
-    return colorToRgba(WORLD_MAP_COLORS.routeFuture, 255)
+    return new Uint8Array(COLOR_MARKER_BORDER_SELECTED)
   }
   if (icao24 === hoveredIcao24) {
-    return colorToRgba(WORLD_MAP_COLORS.label, 255)
+    return new Uint8Array(COLOR_MARKER_BORDER_HOVER)
   }
-  return colorToRgba('#0a0a0a', 255)
+  return new Uint8Array(COLOR_MARKER_BORDER)
 }
 
 function getMarkerSize(
@@ -428,22 +449,32 @@ export function buildRouteSegments(params: {
 }
 
 export function createWorldMapLayers({
+  aircraft,
   hoveredIcao24,
   onHover,
   onSelect,
   routeSegments,
   selectedAircraft,
   selectedIcao24,
-  unselectedAircraft,
 }: {
+  aircraft: AdsbAircraft[]
   hoveredIcao24: string | null
   onHover: HoverHandler
   onSelect: SelectHandler
   routeSegments: RouteSegment[]
   selectedAircraft: AdsbAircraft | null
   selectedIcao24: string | null
-  unselectedAircraft: AdsbAircraft[]
 }) {
+  const markerTransitions = {
+    getAngle: {
+      duration: MARKER_ANGLE_TRANSITION_MS,
+    },
+    getPosition: {
+      duration: MARKER_POSITION_TRANSITION_MS,
+    },
+  } as const
+  const hideSelectedInBaseLayers = selectedAircraft != null
+
   return [
     new PathLayer<RouteSegment>({
       id: 'selected-flight-route',
@@ -453,17 +484,19 @@ export function createWorldMapLayers({
       widthMinPixels: 2,
       getWidth: 2,
       getColor: (segment) =>
-        colorToRgba(
-          segment.type === 'past'
-            ? WORLD_MAP_COLORS.routePast
-            : WORLD_MAP_COLORS.routeFuture,
-          255,
+        new Uint8Array(
+          colorToRgba(
+            segment.type === 'past'
+              ? WORLD_MAP_COLORS.routePast
+              : WORLD_MAP_COLORS.routeFuture,
+            255,
+          ),
         ),
       getPath: (segment) => segment.path,
     }),
     new IconLayer<AdsbAircraft>({
       id: 'flight-marker-borders',
-      data: unselectedAircraft,
+      data: aircraft,
       pickable: false,
       iconAtlas: PLANE_BORDER_ICON_ATLAS,
       iconMapping: PLANE_ICON_MAPPING,
@@ -471,12 +504,18 @@ export function createWorldMapLayers({
       getPosition: (item) => [item.lon, item.lat],
       getAngle: (item) => -item.track,
       getColor: (item) =>
-        getMarkerBorderColor(item, selectedIcao24, hoveredIcao24),
+        getMarkerBorderColor(
+          item,
+          selectedIcao24,
+          hoveredIcao24,
+          hideSelectedInBaseLayers,
+        ),
       getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
       sizeUnits: 'pixels',
       sizeMinPixels: MARKER_MIN_SIZE_PX,
       sizeMaxPixels: MARKER_MAX_SIZE_PX,
       alphaCutoff: 0.05,
+      transitions: markerTransitions,
       updateTriggers: {
         getColor: [selectedIcao24, hoveredIcao24],
         getSize: [selectedIcao24, hoveredIcao24],
@@ -484,7 +523,7 @@ export function createWorldMapLayers({
     }),
     new IconLayer<AdsbAircraft>({
       id: 'flight-markers',
-      data: unselectedAircraft,
+      data: aircraft,
       pickable: true,
       autoHighlight: false,
       iconAtlas: PLANE_ICON_ATLAS,
@@ -492,12 +531,19 @@ export function createWorldMapLayers({
       getIcon: () => 'plane',
       getPosition: (item) => [item.lon, item.lat],
       getAngle: (item) => -item.track,
-      getColor: (item) => getMarkerColor(item, selectedIcao24, hoveredIcao24),
+      getColor: (item) =>
+        getMarkerColor(
+          item,
+          selectedIcao24,
+          hoveredIcao24,
+          hideSelectedInBaseLayers,
+        ),
       getSize: (item) => getMarkerSize(item, selectedIcao24, hoveredIcao24),
       sizeUnits: 'pixels',
       sizeMinPixels: MARKER_MIN_SIZE_PX,
       sizeMaxPixels: MARKER_MAX_SIZE_PX,
       alphaCutoff: 0.05,
+      transitions: markerTransitions,
       updateTriggers: {
         getColor: [selectedIcao24, hoveredIcao24],
         getSize: [selectedIcao24, hoveredIcao24],
@@ -554,6 +600,93 @@ export function createWorldMapLayers({
         const aircraftObject = info.object
         if (!aircraftObject) return
         onSelect(aircraftObject.hex.toLowerCase())
+      },
+    }),
+  ]
+}
+
+export function createReplayMapLayers({
+  hoveredIcao24,
+  replayIcaos,
+  replayManager,
+  selectedIcao24,
+  timestampMs,
+}: {
+  hoveredIcao24: string | null
+  replayIcaos: string[]
+  replayManager: ReplayManager
+  selectedIcao24: string | null
+  timestampMs: number
+}) {
+  return [
+    new IconLayer<string>({
+      id: 'replay-flight-marker-borders',
+      data: replayIcaos,
+      pickable: false,
+      iconAtlas: PLANE_BORDER_ICON_ATLAS,
+      iconMapping: PLANE_ICON_MAPPING,
+      getIcon: () => 'plane',
+      getPosition: (icao) =>
+        replayManager.getPosition(icao, timestampMs) ?? [0, 0],
+      getAngle: (icao) => -(replayManager.getAngle(icao, timestampMs) ?? 0),
+      getColor: (icao) =>
+        new Uint8Array(
+          icao === selectedIcao24
+            ? COLOR_MARKER_BORDER_SELECTED
+            : icao === hoveredIcao24
+              ? COLOR_MARKER_BORDER_HOVER
+              : COLOR_MARKER_BORDER,
+        ),
+      getSize: (icao) => {
+        if (!replayManager.getPosition(icao, timestampMs)) return 0
+        if (icao === selectedIcao24) return MARKER_SIZE_PX + 5
+        if (icao === hoveredIcao24) return MARKER_SIZE_PX + 3
+        return MARKER_SIZE_PX
+      },
+      sizeUnits: 'pixels',
+      sizeMinPixels: MARKER_MIN_SIZE_PX,
+      sizeMaxPixels: MARKER_MAX_SIZE_PX,
+      alphaCutoff: 0.05,
+      updateTriggers: {
+        getAngle: timestampMs,
+        getColor: [selectedIcao24, hoveredIcao24],
+        getPosition: timestampMs,
+        getSize: [timestampMs, selectedIcao24, hoveredIcao24],
+      },
+    }),
+    new IconLayer<string>({
+      id: 'replay-flight-markers',
+      data: replayIcaos,
+      pickable: false,
+      iconAtlas: PLANE_ICON_ATLAS,
+      iconMapping: PLANE_ICON_MAPPING,
+      getIcon: () => 'plane',
+      getPosition: (icao) =>
+        replayManager.getPosition(icao, timestampMs) ?? [0, 0],
+      getAngle: (icao) => -(replayManager.getAngle(icao, timestampMs) ?? 0),
+      getColor: (icao) =>
+        new Uint8Array(
+          icao === selectedIcao24
+            ? COLOR_MARKER_SELECTED
+            : icao === hoveredIcao24
+              ? COLOR_MARKER_HOVER
+              : COLOR_MARKER,
+        ),
+      getSize: (icao) => {
+        if (!replayManager.getPosition(icao, timestampMs)) return 0
+        if (icao === selectedIcao24) return MARKER_SIZE_PX + 5
+        if (icao === hoveredIcao24) return MARKER_SIZE_PX + 3
+        return MARKER_SIZE_PX
+      },
+      sizeUnits: 'pixels',
+      sizeMinPixels: MARKER_MIN_SIZE_PX,
+      sizeMaxPixels: MARKER_MAX_SIZE_PX,
+      alphaCutoff: 0.05,
+      updateTriggers: {
+        getAngle: timestampMs,
+        getColor: [selectedIcao24, hoveredIcao24],
+        getPosition: timestampMs,
+        getSize: [timestampMs, selectedIcao24, hoveredIcao24],
       },
     }),
   ]
