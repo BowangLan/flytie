@@ -1,21 +1,22 @@
-import type { AdsbAircraft } from './flights'
+import { useTooltipStore } from '#/store/tooltip-store'
 
 // ─── Tooltip ──────────────────────────────────────────────────────────────────
 
-export type TooltipData = { aircraft: AdsbAircraft; x: number; y: number }
+export type { TooltipData } from '#/store/tooltip-store'
 
 function fmt(n: number) {
   if (isNaN(n)) return 'N/A'
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 })
 }
 
-export function FlightTooltip({
-  aircraft,
-  x,
-  y,
-  onMouseEnter,
-  onMouseLeave,
-}: TooltipData & { onMouseEnter?: () => void; onMouseLeave?: () => void }) {
+export function FlightTooltip() {
+  const tooltip = useTooltipStore((s) => s.tooltip)
+  const cancelScheduledHide = useTooltipStore((s) => s.cancelScheduledHide)
+  const scheduleHide = useTooltipStore((s) => s.scheduleHide)
+
+  if (!tooltip) return null
+
+  const { aircraft, x, y } = tooltip
   const callsign = aircraft.flight?.trim() ?? ''
   const icao24 = aircraft.hex.toUpperCase()
   const altFt = fmt(aircraft.alt_baro)
@@ -30,8 +31,8 @@ export function FlightTooltip({
   return (
     <div
       className="fixed z-50 min-w-36 rounded border border-neutral-700 bg-neutral-900/95 px-3 py-2 text-xs text-white shadow-xl backdrop-blur-sm"
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
+      onMouseEnter={cancelScheduledHide}
+      onMouseLeave={() => scheduleHide()}
       style={{
         left: flipX ? x - 12 : x + 12,
         top: flipY ? y - 12 : y + 12,

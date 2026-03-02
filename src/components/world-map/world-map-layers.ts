@@ -1,9 +1,11 @@
 import { IconLayer, PathLayer } from '@deck.gl/layers'
 import type { PickingInfo } from '@deck.gl/core'
 import type { AdsbAircraft } from './flights'
+import type { NormalFlightManager } from './normal-flight-manager'
 import type { ReplayManager } from './replay-manager'
 import { getAircraftSizeScale } from './aircraft-size'
 import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
+import { toast } from 'sonner'
 
 const MARKER_SIZE_PX = 22
 const MARKER_MIN_SIZE_PX = 18
@@ -70,7 +72,7 @@ export type RouteSegment = {
   type: 'past' | 'future'
 }
 
-type HoverHandler = (info: PickingInfo<AdsbAircraft>) => void
+type HoverHandler = (info: PickingInfo<string>) => void
 type SelectHandler = (icao24: string | null) => void
 
 function clamp(value: number, min: number, max: number) {
@@ -287,16 +289,20 @@ export function buildRouteSegments(params: {
 }
 
 export function createWorldMapLayers({
-  aircraft,
   hoveredIcao24,
+  lastUpdatedTimestamp,
+  normalFlightIcaos,
+  normalFlightManager,
   onHover,
   onSelect,
   routeSegments,
   selectedAircraft,
   selectedIcao24,
 }: {
-  aircraft: AdsbAircraft[]
   hoveredIcao24: string | null
+  lastUpdatedTimestamp: number
+  normalFlightIcaos: string[]
+  normalFlightManager: NormalFlightManager
   onHover: HoverHandler
   onSelect: SelectHandler
   routeSegments: RouteSegment[]
@@ -312,7 +318,6 @@ export function createWorldMapLayers({
     },
   } as const
   const hideSelectedInBaseLayers = selectedAircraft != null
-  const baseAircraft = aircraft
   const routeLayer = new PathLayer<RouteSegment>({
     id: 'selected-flight-route',
     data: routeSegments,
@@ -333,102 +338,122 @@ export function createWorldMapLayers({
   })
 
   return [
-    new IconLayer<AdsbAircraft>({
+    new IconLayer<string>({
       id: 'flight-marker-borders',
-      data: baseAircraft,
+      data: normalFlightIcaos,
       pickable: false,
       iconAtlas: PLANE_BORDER_ICON_ATLAS,
       iconMapping: PLANE_ICON_MAPPING,
       getIcon: () => 'plane',
-      getPosition: (item) => [item.lon, item.lat],
-      getAngle: (item) => -item.track,
-      getColor: (item) =>
-        getMarkerBorderColor(
+      getPosition: (icao) => normalFlightManager.getPosition(icao) ?? [0, 0],
+      getAngle: (icao) => -(normalFlightManager.getAngle(icao) ?? 0),
+      getColor: (icao) => {
+        const item = normalFlightManager.getAircraft(icao)
+        if (!item) return new Uint8Array([0, 0, 0, 0])
+        return getMarkerBorderColor(
           item,
           selectedIcao24,
           hoveredIcao24,
           hideSelectedInBaseLayers,
-        ),
-      getSize: (item) =>
-        getMarkerSize(
+        )
+      },
+      getSize: (icao) => {
+        const item = normalFlightManager.getAircraft(icao)
+        if (!item) return 0
+        return getMarkerSize(
           item,
           selectedIcao24,
           hoveredIcao24,
           hideSelectedInBaseLayers,
-        ),
+        )
+      },
       sizeUnits: 'pixels',
       sizeMinPixels: MARKER_MIN_SIZE_PX,
       sizeMaxPixels: MARKER_MAX_SIZE_PX,
       alphaCutoff: 0.05,
       transitions: markerTransitions,
       updateTriggers: {
-        getColor: [selectedIcao24, hoveredIcao24],
-        getSize: [selectedIcao24, hoveredIcao24],
+        getAngle: lastUpdatedTimestamp,
+        getColor: [lastUpdatedTimestamp, selectedIcao24, hoveredIcao24],
+        getPosition: lastUpdatedTimestamp,
+        getSize: [lastUpdatedTimestamp, selectedIcao24, hoveredIcao24],
       },
     }),
-    new IconLayer<AdsbAircraft>({
+    new IconLayer<string>({
       id: 'flight-markers',
-      data: baseAircraft,
+      data: normalFlightIcaos,
       pickable: false,
       autoHighlight: false,
       iconAtlas: PLANE_ICON_ATLAS,
       iconMapping: PLANE_ICON_MAPPING,
       getIcon: () => 'plane',
-      getPosition: (item) => [item.lon, item.lat],
-      getAngle: (item) => -item.track,
-      getColor: (item) =>
-        getMarkerColor(
+      getPosition: (icao) => normalFlightManager.getPosition(icao) ?? [0, 0],
+      getAngle: (icao) => -(normalFlightManager.getAngle(icao) ?? 0),
+      getColor: (icao) => {
+        const item = normalFlightManager.getAircraft(icao)
+        if (!item) return new Uint8Array([0, 0, 0, 0])
+        return getMarkerColor(
           item,
           selectedIcao24,
           hoveredIcao24,
           hideSelectedInBaseLayers,
-        ),
-      getSize: (item) =>
-        getMarkerSize(
+        )
+      },
+      getSize: (icao) => {
+        const item = normalFlightManager.getAircraft(icao)
+        if (!item) return 0
+        return getMarkerSize(
           item,
           selectedIcao24,
           hoveredIcao24,
           hideSelectedInBaseLayers,
-        ),
+        )
+      },
       sizeUnits: 'pixels',
       sizeMinPixels: MARKER_MIN_SIZE_PX,
       sizeMaxPixels: MARKER_MAX_SIZE_PX,
       alphaCutoff: 0.05,
       transitions: markerTransitions,
       updateTriggers: {
-        getColor: [selectedIcao24, hoveredIcao24],
-        getSize: [selectedIcao24, hoveredIcao24],
+        getAngle: lastUpdatedTimestamp,
+        getColor: [lastUpdatedTimestamp, selectedIcao24, hoveredIcao24],
+        getPosition: lastUpdatedTimestamp,
+        getSize: [lastUpdatedTimestamp, selectedIcao24, hoveredIcao24],
       },
     }),
-    new IconLayer<AdsbAircraft>({
+    new IconLayer<string>({
       id: 'flight-marker-hit-targets',
-      data: baseAircraft,
+      data: normalFlightIcaos,
       pickable: true,
       autoHighlight: false,
       iconAtlas: HIT_TARGET_ICON_ATLAS,
       iconMapping: HIT_TARGET_ICON_MAPPING,
       getIcon: () => 'hitTarget',
-      getPosition: (item) => [item.lon, item.lat],
+      getPosition: (icao) => normalFlightManager.getPosition(icao) ?? [0, 0],
       getColor: () => new Uint8Array([0, 0, 0, MARKER_HIT_TARGET_ALPHA]),
-      getSize: (item) =>
-        getMarkerHitTargetSize(
+      getSize: (icao) => {
+        const item = normalFlightManager.getAircraft(icao)
+        if (!item) return 0
+        return getMarkerHitTargetSize(
           item,
           selectedIcao24,
           hoveredIcao24,
           hideSelectedInBaseLayers,
-        ),
+        )
+      },
       sizeUnits: 'pixels',
       sizeMinPixels: MARKER_MIN_SIZE_PX * MARKER_HIT_TARGET_MULTIPLIER,
       sizeMaxPixels: MARKER_MAX_SIZE_PX * MARKER_HIT_TARGET_MULTIPLIER,
       alphaCutoff: 0,
       transitions: markerTransitions,
       updateTriggers: {
-        getSize: [selectedIcao24, hoveredIcao24],
+        getPosition: lastUpdatedTimestamp,
+        getSize: [lastUpdatedTimestamp, selectedIcao24, hoveredIcao24],
       },
       onHover,
       onClick: (info) => {
         const aircraftObject = info.object
-        onSelect(aircraftObject ? aircraftObject.hex.toLowerCase() : null)
+        onSelect(aircraftObject ?? null)
       },
     }),
     routeLayer,

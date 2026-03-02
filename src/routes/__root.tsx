@@ -16,6 +16,7 @@ import appCss from '../styles.css?url'
 
 import type { QueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
+import { Toaster } from '#/components/ui/sonner'
 
 interface MyRouterContext {
   queryClient: QueryClient
@@ -76,6 +77,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
                 TanStackQueryDevtools,
               ]}
             />
+            <Toaster richColors />
           </TanStackQueryProvider>
         </ConvexProvider>
         <Scripts />

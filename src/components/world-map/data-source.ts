@@ -1,7 +1,11 @@
 import type { AdsbAircraft } from './flights'
+import type { NormalFlightManager } from './normal-flight-manager'
 
 export type WorldMapDataSnapshot = {
   aircraft: AdsbAircraft[]
+  lastUpdatedTimestamp: number
+  normalFlightIcaos: string[]
+  normalFlightManager: NormalFlightManager
 }
 
 export type WorldMapDataSource = {

@@ -124,30 +124,42 @@ async function fetchNearbyAircraft(
   lon: number,
   dist: number,
 ): Promise<AdsbAircraft[]> {
-  const cacheKey = `adsbexchange:nearby:${lat}:${lon}:${dist}`
-  return getOrSet<AdsbAircraft[]>(
-    cacheKey,
-    async () => {
-      const { key, host } = getRapidApiConfig()
-      const url = `https://${host}/v2/lat/${lat}/lon/${lon}/dist/${dist}/`
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'x-rapidapi-key': key,
-          'x-rapidapi-host': host,
-          'Content-Type': 'application/json',
-        },
-      })
-      if (!res.ok) {
-        throw new Error(
-          `ADSBExchange API error: ${res.status}: ${await res.text()}`,
-        )
-      }
-      const body = (await res.json()) as AdsbExchangeResponse
-      return body.ac
+  console.log('[ADS-B Exchange] Fetching nearby aircraft...')
+  const { key, host } = getRapidApiConfig()
+  const url = `https://${host}/v2/lat/${lat}/lon/${lon}/dist/${dist}/`
+  const start = performance.now()
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'x-rapidapi-key': key,
+      'x-rapidapi-host': host,
+      'Content-Type': 'application/json',
     },
-    2,
+  })
+  const fetchMs = Math.round(performance.now() - start)
+  if (!res.ok) {
+    console.error(
+      `[ADSBExchange] API error ${res.status} after ${fetchMs}ms: ${url}`,
+    )
+    throw new Error(
+      `ADSBExchange API error: ${res.status}: ${await res.text()}`,
+    )
+  }
+  const body = (await res.json()) as AdsbExchangeResponse
+  const totalMs = Math.round(performance.now() - start)
+  console.log(
+    `[ADSBExchange] API call completed in ${totalMs}ms (fetch: ${fetchMs}ms) | ${body.ac.length} aircraft`,
   )
+  return body.ac
+}
+
+async function fetchNearbyAircraftWithCache(
+  lat: number,
+  lon: number,
+  dist: number,
+): Promise<AdsbAircraft[]> {
+  const cacheKey = `adsbexchange:nearby:${lat}:${lon}:${dist}`
+  return getOrSet<AdsbAircraft[]>(cacheKey, () => fetchNearbyAircraft(lat, lon, dist), 2)
 }
 
 /**
@@ -162,12 +174,13 @@ export const getNearbyAircraftAction = createServerFn()
     }),
   )
   .handler(async ({ data }) => {
-    return fetchNearbyAircraft(data.lat, data.lon, data.dist)
+    return fetchNearbyAircraftWithCache(data.lat, data.lon, data.dist)
   })
 
 /**
  * Fetches all aircraft from ADS-B Exchange (global coverage).
  */
 export const getAircraftAllAction = createServerFn().handler(async () => {
-  return fetchNearbyAircraft(0, 0, 1000000)
+  // return fetchNearbyAircraft(0, 0, 1000000)
+  return await fetchNearbyAircraft(0, 0, 1000000)
 })

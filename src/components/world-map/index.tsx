@@ -14,16 +14,10 @@ import {
 } from 'react'
 import Map, { Layer, Source } from 'react-map-gl/maplibre'
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre'
-import {
-  getTracesIndexAction,
-  getTracesAction,
-} from '#/actions/adsbexchange/traces'
-import type { Trace } from '#/actions/adsbexchange/traces'
 import { useReplayTimelineStore } from '#/store/replay-timeline-store'
-import { createReplayManager } from './replay-manager'
-import type { AdsbAircraft } from './flights'
+import { useTooltipStore } from '#/store/tooltip-store'
+import { useReplayData } from './use-replay-data'
 import { FlightTooltip } from './flight-tooltip'
-import type { TooltipData } from './flight-tooltip'
 import { SelectedFlightSheet } from './selected-flight-sheet'
 import { useSelectedFlightStore } from '#/store/selected-flight.store'
 import { MapLegend } from './map-legend'
@@ -61,22 +55,8 @@ import {
 } from './airspace'
 import { FlightSearchDialog } from './flight-search-dialog'
 import { WorldMapToolbar } from './world-map-toolbar'
-import { jsonObjSize, roughObjectSize } from '#/lib/utils'
 import { useFlightsStore } from '#/store/flights-store'
-
-const REPLAY_MAX_TRACES_PER_DAY = 2000
-const REPLAY_BATCH_SIZE = 50
-const REPLAY_CONCURRENT_REQUESTS = 4
-
-function chunkIcaos(icaos: readonly string[], size: number) {
-  const chunks: string[][] = []
-
-  for (let index = 0; index < icaos.length; index += size) {
-    chunks.push(icaos.slice(index, index + size))
-  }
-
-  return chunks
-}
+import { toast } from 'sonner'
 
 function isSameCameraState(a: CameraState, b: CameraState) {
   return (
@@ -104,51 +84,42 @@ export default function WorldMap({
 }: {
   dataSource?: WorldMapDataSource
 }) {
-  'use no memo'
-
-  const { aircraft } = useWorldMapData(dataSource)
+  const {
+    aircraft,
+    lastUpdatedTimestamp,
+    normalFlightIcaos,
+    normalFlightManager,
+  } = useWorldMapData(dataSource)
+  const { replayManager, replayIcaos } = useReplayData()
   const isClient = useSyncExternalStore(
     () => () => { },
     () => true,
     () => false,
   )
-  const [tooltip, setTooltip] = useState<TooltipData | null>(null)
   const [cursorCoord, setCursorCoord] = useState<CursorCoord>(null)
-  const [hoveredIcao24, setHoveredIcao24] = useState<string | null>(null)
   const [cameraState, setCameraState] = useState<CameraState>({
     lon: [0, 0],
     lat: [0, 0],
     zoom: 2 ** INITIAL_VIEW_STATE.zoom,
   })
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const setTooltip = useTooltipStore((s) => s.setTooltip)
+  const scheduleHide = useTooltipStore((s) => s.scheduleHide)
+  const cancelScheduledHide = useTooltipStore((s) => s.cancelScheduledHide)
+  const hoveredIcao24 = useTooltipStore((s) => s.hoveredIcao24)
+  const setHoveredIcao24 = useTooltipStore((s) => s.setHoveredIcao24)
   const mapRef = useRef<MapRef | null>(null)
   const cameraStateRef = useRef(cameraState)
-  const replayRef = useRef(createReplayManager())
-  const [replayIcaos, setReplayIcaos] = useState<string[]>([])
   const setSelectedIcao24 = useSelectedFlightStore(
     (state) => state.setSelectedIcao24,
   )
   const selectedIcao24 = useSelectedFlightStore((state) => state.selectedIcao24)
   const aerodataFlight = useSelectedFlightStore((state) => state.aerodataFlight)
   const replayActive = useReplayTimelineStore((state) => state.active)
-  const replayDate = useReplayTimelineStore((state) => state.date)
   const replayTimestamp = useReplayTimelineStore(
     (state) => state.currentTimestamp,
   )
-  const setReplayLoading = useReplayTimelineStore((state) => state.setLoading)
-  const setReplayLoadingProgress = useReplayTimelineStore(
-    (state) => state.setLoadingProgress,
-  )
-  const setReplayLoadedRange = useReplayTimelineStore(
-    (state) => state.setLoadedRange,
-  )
-  const setReplayTraceCount = useReplayTimelineStore(
-    (state) => state.setTraceCount,
-  )
-
   const { data: weatherTileUrl } = useWeatherRadar(isClient, WEATHER_TILE_SIZE)
   const deferredAircraft = useDeferredValue(aircraft)
-  const aircraftForRender = replayActive ? [] : aircraft
 
   const syncCameraState = useCallback((zoom: number) => {
     const nextCameraState = getCameraState(mapRef.current, zoom)
@@ -196,19 +167,16 @@ export default function WorldMap({
     })
   }, [aerodataFlight, selectedAircraft])
 
-  const handleHover = useEffectEvent((info: PickingInfo<AdsbAircraft>) => {
-    const aircraftObject = info.object ?? null
+  const handleHover = useEffectEvent((info: PickingInfo<string>) => {
+    const aircraftObject = info.object
+      ? normalFlightManager.getAircraft(info.object)
+      : null
     const nextHoveredIcao24 = aircraftObject?.hex.toLowerCase() ?? null
 
     setHoveredIcao24((current) =>
       current === nextHoveredIcao24 ? current : nextHoveredIcao24,
     )
     document.body.style.cursor = aircraftObject ? 'pointer' : ''
-
-    if (hideTimerRef.current) {
-      clearTimeout(hideTimerRef.current)
-      hideTimerRef.current = null
-    }
 
     if (aircraftObject && Number.isFinite(info.x) && Number.isFinite(info.y)) {
       setTooltip({
@@ -219,7 +187,7 @@ export default function WorldMap({
       return
     }
 
-    hideTimerRef.current = setTimeout(() => setTooltip(null), 120)
+    scheduleHide()
   })
 
   const selectAndCenterOnAircraft = useCallback((icao24: string) => {
@@ -235,19 +203,23 @@ export default function WorldMap({
   }, [setSelectedIcao24])
 
   const layers = useMemo(() => {
+    if (lastUpdatedTimestamp === 0) return []
+
     if (replayActive) {
       return createReplayMapLayers({
         hoveredIcao24,
         replayIcaos,
-        replayManager: replayRef.current,
+        replayManager,
         selectedIcao24,
         timestampMs: replayTimestamp,
       })
     }
 
     return createWorldMapLayers({
-      aircraft: aircraftForRender,
       hoveredIcao24,
+      lastUpdatedTimestamp,
+      normalFlightIcaos,
+      normalFlightManager,
       onHover: handleHover,
       onSelect: setSelectedIcao24,
       routeSegments,
@@ -255,12 +227,16 @@ export default function WorldMap({
       selectedIcao24,
     })
   }, [
-    aircraftForRender,
     handleHover,
     hoveredIcao24,
+    lastUpdatedTimestamp,
+    normalFlightIcaos,
+    normalFlightManager,
+
     replayActive,
     replayIcaos,
     replayTimestamp,
+
     routeSegments,
     selectedAircraft,
     selectedIcao24,
@@ -270,9 +246,9 @@ export default function WorldMap({
   useEffect(() => {
     return () => {
       document.body.style.cursor = ''
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
+      cancelScheduledHide()
     }
-  }, [])
+  }, [cancelScheduledHide])
 
   useEffect(() => {
     if (!replayActive) return
@@ -280,103 +256,7 @@ export default function WorldMap({
     setTooltip(null)
     setHoveredIcao24(null)
     document.body.style.cursor = ''
-  }, [replayActive])
-
-  useEffect(() => {
-    if (!isClient) return
-
-    let cancelled = false
-
-    async function loadReplayData() {
-      setReplayLoading(true)
-
-      console.log(`[Replay] Loading traces for ${replayDate.day}/${replayDate.month}/${replayDate.year}`)
-
-      try {
-        if (cancelled) return
-        const icaoList = await getTracesIndexAction({
-          data: {
-            day: replayDate.day,
-            month: replayDate.month,
-            year: replayDate.year,
-          },
-        })
-
-        const max = Math.min(icaoList.length, REPLAY_MAX_TRACES_PER_DAY)
-        const traces: Trace[] = []
-
-        setReplayLoadingProgress({ loaded: 0, total: max })
-
-        for (let i = 0; i < max; i += REPLAY_BATCH_SIZE * REPLAY_CONCURRENT_REQUESTS) {
-          if (cancelled) return
-          console.log(`[Replay] Loading traces ${i} of ${max}`)
-          const batchPromises = Array.from({ length: REPLAY_CONCURRENT_REQUESTS }, (_, j) => {
-            const start = i + j * REPLAY_BATCH_SIZE
-            const batch = icaoList.slice(start, start + REPLAY_BATCH_SIZE)
-            return batch.length
-              ? getTracesAction({
-                data: {
-                  icao24: batch,
-                  day: replayDate.day,
-                  month: replayDate.month,
-                  year: replayDate.year,
-                },
-              })
-              : Promise.resolve([])
-          })
-          const results = await Promise.all(batchPromises)
-          traces.push(...results.flat())
-          const loaded = Math.min(
-            i + REPLAY_BATCH_SIZE * REPLAY_CONCURRENT_REQUESTS,
-            max,
-          )
-          setReplayLoadingProgress({ loaded, total: max })
-        }
-
-        console.log(`[Replay] Loaded ${traces.length} icaos for ${replayDate.day}/${replayDate.month}/${replayDate.year}`)
-
-        // log total data size in MB
-        // const totalSize = roughObjectSize(traces)
-        // console.log(`[Replay] Total data size: ${totalSize / 1024 / 1024} MB`)
-        // // log total data size in string length
-        // const totalStringLength = JSON.stringify(traces).length
-        // console.log(`[Replay] Total string length: ${totalStringLength} characters`)
-        // // log total string length in bytes calculated from the string length
-        // const jsonSize = jsonObjSize(traces)
-        // console.log(`[Replay] Total string length in bytes: ${jsonSize} bytes (${jsonSize / 1024 / 1024} MB)`)
-
-        replayRef.current.setTraces(traces)
-        const icaos = replayRef.current.getIcaos()
-        setReplayIcaos(icaos)
-        setReplayLoadedRange(replayRef.current.getLoadedRange())
-        setReplayTraceCount(icaos.length)
-        setReplayLoading(false)
-      } catch (error) {
-        if (cancelled) return
-        replayRef.current.clear()
-        setReplayIcaos([])
-        setReplayLoadedRange(null)
-        setReplayTraceCount(0)
-        setReplayLoading(false)
-        console.error('[Replay] Failed to load replay traces', error)
-      }
-    }
-
-    void loadReplayData()
-
-    return () => {
-      cancelled = true
-    }
-  }, [
-    isClient,
-    replayDate.day,
-    replayDate.month,
-    replayDate.year,
-    setReplayLoadedRange,
-    setReplayLoading,
-    setReplayLoadingProgress,
-    setReplayTraceCount,
-  ])
+  }, [replayActive, setTooltip, setHoveredIcao24])
 
   // useEffect(() => {
   //   if (!selectedAircraft || !mapRef.current) return
@@ -452,20 +332,7 @@ export default function WorldMap({
           <WorldMapDeckOverlay layers={layers} interleaved />
         </Map>
       </div>
-      {tooltip && (
-        <FlightTooltip
-          {...tooltip}
-          onMouseEnter={() => {
-            if (hideTimerRef.current) {
-              clearTimeout(hideTimerRef.current)
-              hideTimerRef.current = null
-            }
-          }}
-          onMouseLeave={() => {
-            hideTimerRef.current = setTimeout(() => setTooltip(null), 120)
-          }}
-        />
-      )}
+      <FlightTooltip />
       <MapLegend {...cameraState} cursor={cursorCoord} />
       <div className="pointer-events-none fixed top-5 left-5 z-20">
         <FlightSearchDialog
