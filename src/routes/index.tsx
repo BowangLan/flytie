@@ -1,7 +1,6 @@
+import WorldMap from '#/components/world-map'
 import { createFileRoute } from '@tanstack/react-router'
 import { lazy, Suspense } from 'react'
-
-const WorldMap = lazy(() => import('../components/world-map'))
 
 export const Route = createFileRoute('/')({ component: HomePage })
 

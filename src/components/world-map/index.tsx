@@ -2,18 +2,17 @@ import type { PickingInfo } from '@deck.gl/core'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {
-  startTransition,
   useCallback,
   useDeferredValue,
   useEffect,
   useEffectEvent,
   useMemo,
   useRef,
-  useState,
   useSyncExternalStore,
 } from 'react'
 import Map, { Layer, Source } from 'react-map-gl/maplibre'
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre'
+import { useCameraStateStore } from '#/store/camera-state-store'
 import { useReplayTimelineStore } from '#/store/replay-timeline-store'
 import { useTooltipStore } from '#/store/tooltip-store'
 import { useReplayData } from './use-replay-data'
@@ -45,7 +44,6 @@ import {
   WEATHER_TILE_SIZE,
   WORLD_MAP_BACKGROUND_STYLE,
 } from './world-map-config'
-import type { CursorCoord } from './world-map-config'
 import { applyMapStyleOverrides } from './world-map-style'
 import {
   AIRSPACE_BOUNDARIES_DATA_URL,
@@ -57,16 +55,6 @@ import { FlightSearchDialog } from './flight-search-dialog'
 import { WorldMapToolbar } from './world-map-toolbar'
 import { useFlightsStore } from '#/store/flights-store'
 import { toast } from 'sonner'
-
-function isSameCameraState(a: CameraState, b: CameraState) {
-  return (
-    a.lon[0] === b.lon[0] &&
-    a.lon[1] === b.lon[1] &&
-    a.lat[0] === b.lat[0] &&
-    a.lat[1] === b.lat[1] &&
-    a.zoom === b.zoom
-  )
-}
 
 function getCameraState(map: MapRef | null, zoom: number): CameraState | null {
   if (!map) return null
@@ -96,19 +84,14 @@ export default function WorldMap({
     () => true,
     () => false,
   )
-  const [cursorCoord, setCursorCoord] = useState<CursorCoord>(null)
-  const [cameraState, setCameraState] = useState<CameraState>({
-    lon: [0, 0],
-    lat: [0, 0],
-    zoom: 2 ** INITIAL_VIEW_STATE.zoom,
-  })
+  const setCameraState = useCameraStateStore((s) => s.setCameraState)
+  const setCursorCoord = useCameraStateStore((s) => s.setCursorCoord)
   const setTooltip = useTooltipStore((s) => s.setTooltip)
   const scheduleHide = useTooltipStore((s) => s.scheduleHide)
   const cancelScheduledHide = useTooltipStore((s) => s.cancelScheduledHide)
   const hoveredIcao24 = useTooltipStore((s) => s.hoveredIcao24)
   const setHoveredIcao24 = useTooltipStore((s) => s.setHoveredIcao24)
   const mapRef = useRef<MapRef | null>(null)
-  const cameraStateRef = useRef(cameraState)
   const setSelectedIcao24 = useSelectedFlightStore(
     (state) => state.setSelectedIcao24,
   )
@@ -123,13 +106,9 @@ export default function WorldMap({
 
   const syncCameraState = useCallback((zoom: number) => {
     const nextCameraState = getCameraState(mapRef.current, zoom)
-    if (!nextCameraState) return
-    if (isSameCameraState(cameraStateRef.current, nextCameraState)) return
-    cameraStateRef.current = nextCameraState
-    startTransition(() => {
-      setCameraState(nextCameraState)
-    })
-  }, [])
+    // toast.info(`Update camera state to Lat: [${nextCameraState?.lat[0].toFixed(2)}, ${nextCameraState?.lat[1].toFixed(2)}], Lon: [${nextCameraState?.lon[0].toFixed(4)}, ${nextCameraState?.lon[1].toFixed(4)}]`)
+    setCameraState(nextCameraState)
+  }, [setCameraState])
 
   const handleMapLoad = useCallback(() => {
     const map = mapRef.current?.getMap()
@@ -258,16 +237,6 @@ export default function WorldMap({
     document.body.style.cursor = ''
   }, [replayActive, setTooltip, setHoveredIcao24])
 
-  // useEffect(() => {
-  //   if (!selectedAircraft || !mapRef.current) return
-
-  //   mapRef.current.easeTo({
-  //     center: [selectedAircraft.lon, selectedAircraft.lat],
-  //     duration: 700,
-  //     essential: true,
-  //   })
-  // }, [selectedAircraft])
-
   if (!isClient) {
     return (
       <>
@@ -333,7 +302,7 @@ export default function WorldMap({
         </Map>
       </div>
       <FlightTooltip />
-      <MapLegend {...cameraState} cursor={cursorCoord} />
+      {/* <MapLegend /> */}
       <div className="pointer-events-none fixed top-5 left-5 z-20">
         <FlightSearchDialog
           aircraft={deferredAircraft}

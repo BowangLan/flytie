@@ -124,7 +124,7 @@ async function fetchNearbyAircraft(
   lon: number,
   dist: number,
 ): Promise<AdsbAircraft[]> {
-  console.log('[ADS-B Exchange] Fetching nearby aircraft...')
+  // console.log(`[ADS-B Exchange] Fetching nearby aircraft... lat: ${lat.toFixed(2)}, lon: ${lon.toFixed(2)}, dist: ${dist.toFixed(2)}`)
   const { key, host } = getRapidApiConfig()
   const url = `https://${host}/v2/lat/${lat}/lon/${lon}/dist/${dist}/`
   const start = performance.now()
@@ -148,7 +148,7 @@ async function fetchNearbyAircraft(
   const body = (await res.json()) as AdsbExchangeResponse
   const totalMs = Math.round(performance.now() - start)
   console.log(
-    `[ADSBExchange] API call completed in ${totalMs}ms (fetch: ${fetchMs}ms) | ${body.ac.length} aircraft`,
+    `[ADSBExchange] API call completed in ${totalMs}ms (fetch: ${fetchMs}ms) | ${body.ac.length} aircraft | lat: ${lat.toFixed(2)}, lon: ${lon.toFixed(2)}, dist: ${dist.toFixed(2)}`,
   )
   return body.ac
 }
@@ -159,7 +159,9 @@ async function fetchNearbyAircraftWithCache(
   dist: number,
 ): Promise<AdsbAircraft[]> {
   const cacheKey = `adsbexchange:nearby:${lat}:${lon}:${dist}`
-  return getOrSet<AdsbAircraft[]>(cacheKey, () => fetchNearbyAircraft(lat, lon, dist), 2)
+  return getOrSet<AdsbAircraft[]>(cacheKey, () => fetchNearbyAircraft(lat, lon, dist), 1)
+  // const aircraft = await fetchNearbyAircraft(lat, lon, dist)
+  // return aircraft
 }
 
 /**
@@ -182,5 +184,6 @@ export const getNearbyAircraftAction = createServerFn()
  */
 export const getAircraftAllAction = createServerFn().handler(async () => {
   // return fetchNearbyAircraft(0, 0, 1000000)
-  return await fetchNearbyAircraft(0, 0, 1000000)
+  // return await fetchNearbyAircraft(0, 0, 1000000)
+  return await fetchNearbyAircraft(38, 6, 500)
 })

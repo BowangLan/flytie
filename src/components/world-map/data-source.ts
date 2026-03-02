@@ -9,7 +9,7 @@ export type WorldMapDataSnapshot = {
 }
 
 export type WorldMapDataSource = {
-  loadAircraft: () => Promise<AdsbAircraft[]>
+  loadAircraft: ({ lat, lon, dist }: { lat: number, lon: number, dist: number }) => Promise<AdsbAircraft[]>
 }
 
 export function createWorldMapDataSource({

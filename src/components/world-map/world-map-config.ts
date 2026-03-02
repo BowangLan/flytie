@@ -1,14 +1,21 @@
 import type { ViewState } from 'react-map-gl/maplibre'
 import { COLORS } from '@/lib/colors'
 import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
+import type { CameraState } from './map-legend'
 
 export const INITIAL_VIEW_STATE: ViewState = {
-  longitude: 0,
-  latitude: 20,
-  zoom: 4,
+  longitude: -122.16,
+  latitude: 38.16,
+  zoom: 6,
   bearing: 0,
   pitch: 0,
   padding: { top: 0, bottom: 0, left: 0, right: 0 },
+}
+
+export const INITIAL_CAMERA_STATE: CameraState = {
+  lon: [0, 0],
+  lat: [0, 0],
+  zoom: 2 ** INITIAL_VIEW_STATE.zoom,
 }
 
 export const MIN_ZOOM = 1
@@ -36,3 +43,5 @@ export type CursorCoord = { lon: number; lat: number } | null
 export const WORLD_MAP_BACKGROUND_STYLE = {
   background: WORLD_MAP_COLORS.background,
 }
+
+export const REFRESH_INTERVAL_MS = 1500 // 10 seconds

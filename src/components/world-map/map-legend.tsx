@@ -1,3 +1,5 @@
+import { memo } from 'react'
+import { useCameraStateStore } from '#/store/camera-state-store'
 import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
 
 export interface CameraState {
@@ -32,14 +34,9 @@ function formatRange(
   return `${formatCoord(min, pos, neg)} - ${formatCoord(max, pos, neg)}`
 }
 
-export function MapLegend({
-  lon,
-  lat,
-  zoom,
-  cursor,
-}: CameraState & {
-  cursor?: { lon: number; lat: number } | null
-}) {
+export const MapLegend = memo(function MapLegend() {
+  const { lon, lat, zoom } = useCameraStateStore((s) => s.cameraState)
+  const cursor = useCameraStateStore((s) => s.cursorCoord)
   const centerLat = (lat[0] + lat[1]) / 2
   // km per pixel at the current latitude (horizontal, along a parallel)
   const kmPerPx = (1 / zoom) * 111.32 * Math.cos((centerLat * Math.PI) / 180)
@@ -123,7 +120,7 @@ export function MapLegend({
                 className="absolute bottom-0.5 left-0 h-0.5 rounded-full"
                 style={{
                   width: barPx,
-                  background: WORLD_MAP_COLORS.route,
+                  background: WORLD_MAP_COLORS.outline,
                 }}
               />
               <div
@@ -141,4 +138,4 @@ export function MapLegend({
       </div>
     </div>
   )
-}
+})
