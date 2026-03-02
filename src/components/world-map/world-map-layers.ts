@@ -5,7 +5,6 @@ import type { NormalFlightManager } from './normal-flight-manager'
 import type { ReplayManager } from './replay-manager'
 import { getAircraftSizeScale } from './aircraft-size'
 import { WORLD_MAP_COLORS } from '@/lib/world-map-colors'
-import { toast } from 'sonner'
 
 const MARKER_SIZE_PX = 22
 const MARKER_MIN_SIZE_PX = 18
@@ -72,7 +71,7 @@ export type RouteSegment = {
   type: 'past' | 'future'
 }
 
-type HoverHandler = (info: PickingInfo<string>) => void
+type HoverHandler = (info: PickingInfo<string | AdsbAircraft>) => void
 type SelectHandler = (icao24: string | null) => void
 
 function clamp(value: number, min: number, max: number) {
@@ -389,9 +388,6 @@ export function createWorldMapLayers({
       getIcon: () => 'plane',
       getPosition: (icao) => {
         const position = normalFlightManager.getPosition(icao)
-        if (icao === '34560D'){
-          toast.info(`getPosition(${icao}); position: ${position}`)
-        }
         if (!position) return [0, 0]
         return position
       },

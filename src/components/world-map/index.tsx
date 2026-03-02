@@ -29,6 +29,7 @@ import {
   createWorldMapLayers,
 } from './world-map-layers'
 import type { RouteSegment } from './world-map-layers'
+import type { AdsbAircraft } from './flights'
 import { useWeatherRadar } from './use-weather-radar'
 import { WorldMapDeckOverlay } from './world-map-deck-overlay'
 import { ReplayTimeline } from './replay-timeline'
@@ -54,7 +55,6 @@ import {
 import { FlightSearchDialog } from './flight-search-dialog'
 import { WorldMapToolbar } from './world-map-toolbar'
 import { useFlightsStore } from '#/store/flights-store'
-import { toast } from 'sonner'
 
 function getCameraState(map: MapRef | null, zoom: number): CameraState | null {
   if (!map) return null
@@ -123,10 +123,16 @@ export default function WorldMap({
     applyMapStyleOverrides(map)
   }, [])
 
-  const selectedAircraft = useFlightsStore((state) => selectedIcao24 ? state.map.get(selectedIcao24) ?? null : null)
+  const flightsMap = useFlightsStore((state) => state.map)
+  const selectedAircraft = useMemo(
+    () => (selectedIcao24 ? flightsMap.get(selectedIcao24) ?? null : null),
+    [flightsMap, selectedIcao24],
+  )
 
   // const routeSegments: RouteSegment[] = [];
   const routeSegments = useMemo<RouteSegment[]>(() => {
+    if (!selectedIcao24) return []
+
     const departure = aerodataFlight?.departure.airport.location
     const arrival = aerodataFlight?.arrival.airport.location
     const currentPosition = selectedAircraft
@@ -144,12 +150,14 @@ export default function WorldMap({
       currentPosition,
       track,
     })
-  }, [aerodataFlight, selectedAircraft])
+  }, [aerodataFlight, selectedAircraft, selectedIcao24])
 
-  const handleHover = useEffectEvent((info: PickingInfo<string>) => {
-    const aircraftObject = info.object
-      ? normalFlightManager.getAircraft(info.object)
-      : null
+  const handleHover = useEffectEvent((info: PickingInfo<string | AdsbAircraft>) => {
+    const pickedObject = info.object
+    const aircraftObject =
+      typeof pickedObject === 'string'
+        ? normalFlightManager.getAircraft(pickedObject)
+        : pickedObject ?? null
     const nextHoveredIcao24 = aircraftObject?.hex.toLowerCase() ?? null
 
     setHoveredIcao24((current) =>
@@ -214,6 +222,7 @@ export default function WorldMap({
 
     replayActive,
     replayIcaos,
+    replayManager,
     replayTimestamp,
 
     routeSegments,
@@ -236,6 +245,14 @@ export default function WorldMap({
     setHoveredIcao24(null)
     document.body.style.cursor = ''
   }, [replayActive, setTooltip, setHoveredIcao24])
+
+  useEffect(() => {
+    if (selectedIcao24 !== null) return
+
+    setTooltip(null)
+    setHoveredIcao24(null)
+    document.body.style.cursor = ''
+  }, [selectedIcao24, setTooltip, setHoveredIcao24])
 
   if (!isClient) {
     return (
